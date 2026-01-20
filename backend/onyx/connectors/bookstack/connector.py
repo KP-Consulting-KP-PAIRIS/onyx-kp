@@ -23,6 +23,9 @@ from onyx.file_processing.html_utils import parse_html_page_basic
 
 
 class BookstackConnector(LoadConnector, PollConnector):
+    # KPC modification
+    redacted_list = ['policies-editor', 'procedures-editor', 'processes-editor', 'isms-editor', 'policies-archive', 'procedures-archive', 'processes-archive', 'isms-archive', 'isms-queue', 'pending']
+    
     def __init__(
         self,
         batch_size: int = INDEX_BATCH_SIZE,
@@ -79,6 +82,20 @@ class BookstackConnector(LoadConnector, PollConnector):
         updated_at_str = (
             str(book.get("updated_at")) if book.get("updated_at") is not None else None
         )
+
+        # KPC modification start
+        if any(ele in str(book.get("slug")) for ele in BookstackConnector.redacted_list):
+            return Document(
+                id="book__0",
+                sections=[TextSection(link="#", text="")],
+                source=DocumentSource.BOOKSTACK,
+                semantic_identifier="Book: REDACTED",
+                title="REDACTED",
+                doc_updated_at=None,
+                metadata={"type": "book"},
+            )
+        # Modification end
+        
         return Document(
             id="book__" + str(book.get("id")),
             sections=[TextSection(link=url, text=text)],
@@ -108,6 +125,20 @@ class BookstackConnector(LoadConnector, PollConnector):
             if chapter.get("updated_at") is not None
             else None
         )
+
+        # KPC modification start
+        if any(ele in str(chapter.get("book_slug")) for ele in BookstackConnector.redacted_list):
+            return Document(
+                id="chapter__0",
+                sections=[TextSection(link="#", text="")],
+                source=DocumentSource.BOOKSTACK,
+                semantic_identifier="Chapter: REDACTED",
+                title="REDACTED",
+                doc_updated_at=None,
+                metadata={"type": "chapter"},
+            )
+        # Modification end
+        
         return Document(
             id="chapter__" + str(chapter.get("id")),
             sections=[TextSection(link=url, text=text)],
@@ -132,6 +163,20 @@ class BookstackConnector(LoadConnector, PollConnector):
             if shelf.get("updated_at") is not None
             else None
         )
+
+        # KPC modification start
+        if any(ele in str(shelf.get("slug")) for ele in BookstackConnector.redacted_list):
+            return Document(
+                id="shelf:0",
+                sections=[TextSection(link="#", text="")],
+                source=DocumentSource.BOOKSTACK,
+                semantic_identifier="Shelf: REDACTED",
+                title="REDACTED",
+                doc_updated_at=None,
+                metadata={"type": "shelf"},
+            )
+        # Modification end
+        
         return Document(
             id="shelf:" + str(shelf.get("id")),
             sections=[TextSection(link=url, text=text)],
@@ -165,6 +210,20 @@ class BookstackConnector(LoadConnector, PollConnector):
             else None
         )
         time.sleep(0.1)
+
+        # KPC modification start
+        if any(ele in str(page.get("book_slug")) for ele in BookstackConnector.redacted_list):
+            return Document(
+                id="page:0",
+                sections=[TextSection(link="#", text="")],
+                source=DocumentSource.BOOKSTACK,
+                semantic_identifier="Page: REDACTED",
+                title="REDACTED",
+                doc_updated_at=None,
+                metadata={"type": "page"},
+            )
+        # Modification end
+        
         return Document(
             id="page:" + page_id,
             sections=[TextSection(link=url, text=text)],
