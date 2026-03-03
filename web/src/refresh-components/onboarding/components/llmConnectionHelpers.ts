@@ -1,4 +1,4 @@
-import { ModelConfiguration } from "@/app/admin/configuration/llm/interfaces";
+import { ModelConfiguration } from "@/interfaces/llm";
 import { parseAzureTargetUri } from "@/lib/azureTargetUri";
 
 export const buildInitialValues = () => ({
@@ -85,20 +85,15 @@ export const testApiKeyHelper = async (
     api_version: finalApiVersion,
     deployment_name: finalDeploymentName,
     provider: providerName,
+    // since this is used for onboarding, we always specify the
+    // API key and custom config
     api_key_changed: true,
+    custom_config_changed: true,
     custom_config: {
       ...(formValues?.custom_config ?? {}),
       ...(customConfigOverride ?? {}),
     },
-    default_model_name: modelName ?? formValues?.default_model_name ?? "",
-    model_configurations: [
-      ...(formValues.model_configurations || []).map(
-        (model: ModelConfiguration) => ({
-          name: model.name,
-          is_visible: true,
-        })
-      ),
-    ],
+    model: modelName ?? formValues?.default_model_name ?? "",
   };
 
   return await submitLlmTestRequest(

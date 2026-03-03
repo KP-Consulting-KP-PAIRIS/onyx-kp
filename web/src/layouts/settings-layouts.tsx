@@ -36,37 +36,53 @@
 import BackButton from "@/refresh-components/buttons/BackButton";
 import { cn } from "@/lib/utils";
 import Separator from "@/refresh-components/Separator";
-import Spacer from "@/refresh-components/Spacer";
-import Text from "@/refresh-components/texts/Text";
 import { WithoutStyles } from "@/types";
-import { IconProps } from "@opal/types";
+import { IconFunctionComponent } from "@opal/types";
 import { HtmlHTMLAttributes, useEffect, useRef, useState } from "react";
+import { Content } from "@opal/layouts";
+import Spacer from "@/refresh-components/Spacer";
+
+const widthClasses = {
+  sm: "w-[min(var(--container-sm),100%)]",
+  "sm-md": "w-[min(var(--container-sm-md),100%)]",
+  md: "w-[min(var(--container-md),100%)]",
+  lg: "w-[min(var(--container-lg),100%)]",
+  full: "w-[var(--container-full)]",
+};
 
 /**
  * Settings Root Component
  *
  * Wrapper component that provides the base structure for settings pages.
- * Creates a centered, scrollable container with a maximum width of 50rem.
+ * Creates a centered, scrollable container with configurable width.
  *
  * Features:
  * - Full height container with centered content
  * - Automatic overflow-y scrolling
  * - Contains the scroll container ID that Settings.Header uses for shadow detection
- * - Maximum content width of 50rem (responsive)
+ * - Configurable width via CSS variables defined in sizes.css:
+ *   "sm" (672px), "sm-md" (752px), "md" (872px, default), "lg" (992px), "full" (100%)
  *
  * @example
  * ```tsx
+ * // Default medium width (872px max)
  * <SettingsLayouts.Root>
+ *   <SettingsLayouts.Header {...} />
+ *   <SettingsLayouts.Body>...</SettingsLayouts.Body>
+ * </SettingsLayouts.Root>
+ *
+ * // Large width (992px max)
+ * <SettingsLayouts.Root width="lg">
  *   <SettingsLayouts.Header {...} />
  *   <SettingsLayouts.Body>...</SettingsLayouts.Body>
  * </SettingsLayouts.Root>
  * ```
  */
-export type SettingsRootProps = WithoutStyles<
-  React.HtmlHTMLAttributes<HTMLDivElement>
->;
-
-function SettingsRoot(props: SettingsRootProps) {
+interface SettingsRootProps
+  extends WithoutStyles<React.HtmlHTMLAttributes<HTMLDivElement>> {
+  width?: keyof typeof widthClasses;
+}
+function SettingsRoot({ width = "md", ...props }: SettingsRootProps) {
   return (
     <div
       id="page-wrapper-scroll-container"
@@ -75,7 +91,7 @@ function SettingsRoot(props: SettingsRootProps) {
       {/* WARNING: The id="page-wrapper-scroll-container" above is used by SettingsHeader
           to detect scroll position and show/hide the scroll shadow.
           DO NOT REMOVE this ID without updating SettingsHeader accordingly. */}
-      <div className="h-full w-[min(50rem,100%)]">
+      <div className={cn("h-full", widthClasses[width])}>
         <div {...props} />
       </div>
     </div>
@@ -93,7 +109,7 @@ function SettingsRoot(props: SettingsRootProps) {
  * - Sticky positioning at the top of the page
  * - Icon display (1.75rem size)
  * - Title (headingH2 style)
- * - Optional description (supports any React node for dynamic content)
+ * - Optional description (string)
  * - Optional right-aligned action buttons via rightChildren
  * - Optional children content below title/description
  * - Optional back button
@@ -143,30 +159,24 @@ function SettingsRoot(props: SettingsRootProps) {
  *   backButton
  * />
  *
- * // With dynamic description content
+ * // With string description
  * <SettingsLayouts.Header
  *   icon={SvgDatabase}
  *   title="API Keys"
- *   description={
- *     <div>
- *       <Text as="p" secondaryBody text03>
- *         Manage your API keys. Last updated: {lastUpdated}
- *       </Text>
- *     </div>
- *   }
+ *   description="Manage your API keys"
  * />
  * ```
  */
 export interface SettingsHeaderProps {
-  icon: React.FunctionComponent<IconProps>;
+  icon: IconFunctionComponent;
   title: string;
-  description?: React.ReactNode;
+  description?: string;
   children?: React.ReactNode;
   rightChildren?: React.ReactNode;
   backButton?: boolean;
+  onBack?: () => void;
   separator?: boolean;
 }
-
 function SettingsHeader({
   icon: Icon,
   title,
@@ -174,12 +184,19 @@ function SettingsHeader({
   children,
   rightChildren,
   backButton,
+  onBack,
   separator,
 }: SettingsHeaderProps) {
   const [showShadow, setShowShadow] = useState(false);
   const headerRef = useRef<HTMLDivElement>(null);
 
+  // # NOTE (@Subash-Mohan)
+  // Headers with actions are always sticky, others are not.
+  const isSticky = !!rightChildren;
+
   useEffect(() => {
+    if (!isSticky) return;
+
     // IMPORTANT: This component relies on SettingsRoot having the ID "page-wrapper-scroll-container"
     // on its scrollable container. If that ID is removed or changed, the scroll shadow will not work.
     const scrollContainer = document.getElementById(
@@ -196,62 +213,63 @@ function SettingsHeader({
     handleScroll(); // Check initial state
 
     return () => scrollContainer.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [isSticky]);
 
   return (
     <div
       ref={headerRef}
       className={cn(
-        "sticky top-0 z-10 w-full bg-background-tint-01",
-        backButton ? "pt-4" : "pt-10"
+        "w-full bg-background-tint-01",
+        isSticky && "sticky top-0 z-settings-header",
+        backButton && "md:pt-4"
       )}
     >
       {backButton && (
         <div className="px-2">
-          <BackButton />
+          <BackButton behaviorOverride={onBack} />
         </div>
       )}
-      <div
-        className={cn("flex flex-col gap-6 px-4", backButton ? "pt-2" : "pt-4")}
-      >
-        <div className="flex flex-col">
-          <div className="flex flex-row justify-between items-center gap-4">
-            <Icon className="stroke-text-04 h-[1.75rem] w-[1.75rem]" />
-            {rightChildren}
+
+      <Spacer vertical rem={1} />
+
+      <div className="flex flex-col gap-6 px-4">
+        <div className="flex w-full justify-between">
+          <div aria-label="admin-page-title">
+            <Content
+              icon={Icon}
+              title={title}
+              description={description}
+              sizePreset="headline"
+              variant="heading"
+            />
           </div>
-          <div className="flex flex-col">
-            <div aria-label="admin-page-title">
-              <Text as="p" headingH2>
-                {title}
-              </Text>
-            </div>
-            {description &&
-              (typeof description === "string" ? (
-                <Text as="p" secondaryBody text03>
-                  {description}
-                </Text>
-              ) : (
-                description
-              ))}
-          </div>
+          {rightChildren}
         </div>
+
         {children}
       </div>
-      {separator && (
+
+      {separator ? (
         <>
-          <Spacer rem={1.5} />
+          <Spacer vertical rem={1.5} />
           <Separator noPadding className="px-4" />
         </>
+      ) : (
+        <Spacer vertical rem={0.5} />
       )}
-      <div
-        className={cn(
-          "absolute left-0 right-0 h-[0.5rem] pointer-events-none transition-opacity duration-300 rounded-b-08 opacity-0",
-          showShadow && "opacity-100"
-        )}
-        style={{
-          background: "linear-gradient(to bottom, var(--mask-02), transparent)",
-        }}
-      />
+
+      {isSticky && (
+        <div
+          className={cn(
+            "absolute left-0 right-0 h-[0.5rem] pointer-events-none transition-opacity duration-300 rounded-b-08 opacity-0",
+            showShadow && "opacity-100"
+          )}
+          style={{
+            background:
+              "linear-gradient(to bottom, var(--mask-02), transparent)",
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -283,11 +301,9 @@ function SettingsHeader({
  * </SettingsLayouts.Body>
  * ```
  */
-export type SettingsBodyProps = WithoutStyles<
-  HtmlHTMLAttributes<HTMLDivElement>
->;
-
-function SettingsBody(props: SettingsBodyProps) {
+function SettingsBody(
+  props: WithoutStyles<HtmlHTMLAttributes<HTMLDivElement>>
+) {
   return (
     <div
       className="pt-6 pb-[4.5rem] px-4 flex flex-col gap-8 w-full"

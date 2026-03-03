@@ -5,13 +5,15 @@
 //
 // This is useful in determining what `SidebarTab` should be active, for example.
 
-import { SEARCH_PARAM_NAMES } from "@/app/chat/services/searchParams";
+import { SEARCH_PARAM_NAMES } from "@/app/app/services/searchParams";
 import { usePathname, useSearchParams } from "next/navigation";
 
 export type AppFocusType =
   | { type: "agent" | "project" | "chat"; id: string }
   | "new-session"
-  | "more-agents";
+  | "more-agents"
+  | "user-settings"
+  | "shared-chat";
 
 export class AppFocus {
   constructor(public value: AppFocusType) {}
@@ -28,6 +30,10 @@ export class AppFocus {
     return typeof this.value === "object" && this.value.type === "chat";
   }
 
+  isSharedChat(): boolean {
+    return this.value === "shared-chat";
+  }
+
   isNewSession(): boolean {
     return this.value === "new-session";
   }
@@ -36,11 +42,22 @@ export class AppFocus {
     return this.value === "more-agents";
   }
 
+  isUserSettings(): boolean {
+    return this.value === "user-settings";
+  }
+
   getId(): string | null {
     return typeof this.value === "object" ? this.value.id : null;
   }
 
-  getType(): "agent" | "project" | "chat" | "new-session" | "more-agents" {
+  getType():
+    | "agent"
+    | "project"
+    | "chat"
+    | "shared-chat"
+    | "new-session"
+    | "more-agents"
+    | "user-settings" {
     return typeof this.value === "object" ? this.value.type : this.value;
   }
 }
@@ -49,8 +66,18 @@ export default function useAppFocus(): AppFocus {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // Check if we're viewing a shared chat
+  if (pathname.startsWith("/app/shared/")) {
+    return new AppFocus("shared-chat");
+  }
+
+  // Check if we're on the user settings page
+  if (pathname.startsWith("/app/settings")) {
+    return new AppFocus("user-settings");
+  }
+
   // Check if we're on the agents page
-  if (pathname.startsWith("/chat/agents")) {
+  if (pathname.startsWith("/app/agents")) {
     return new AppFocus("more-agents");
   }
 

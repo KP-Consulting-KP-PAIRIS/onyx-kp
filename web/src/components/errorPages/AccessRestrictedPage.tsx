@@ -3,20 +3,28 @@
 import { useState } from "react";
 import Link from "next/link";
 import ErrorPageLayout from "@/components/errorPages/ErrorPageLayout";
-import { fetchCustomerPortal } from "@/lib/billing/utils";
-import { useRouter } from "next/navigation";
 import Button from "@/refresh-components/buttons/Button";
 import InlineExternalLink from "@/refresh-components/InlineExternalLink";
 import { logout } from "@/lib/user";
 import { loadStripe } from "@stripe/stripe-js";
-import {
-  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-  NEXT_PUBLIC_CLOUD_ENABLED,
-} from "@/lib/constants";
+import { NEXT_PUBLIC_CLOUD_ENABLED } from "@/lib/constants";
+import { useLicense } from "@/hooks/useLicense";
+import { useSettingsContext } from "@/providers/SettingsProvider";
+import { ApplicationStatus } from "@/interfaces/settings";
 import Text from "@/refresh-components/texts/Text";
 import { SvgLock } from "@opal/icons";
 
-const linkClassName = "text-action-link-05 hover:text-action-link-06";
+const linkClassName = "text-action-link-05 hover:text-action-link-06 underline";
+
+const fetchStripePublishableKey = async (): Promise<string> => {
+  const response = await fetch("/api/tenants/stripe-publishable-key");
+  if (!response.ok) {
+    throw new Error("Failed to fetch Stripe publishable key");
+  }
+  const data = await response.json();
+  return data.publishable_key;
+};
+
 const fetchResubscriptionSession = async () => {
   const response = await fetch("/api/tenants/create-subscription-session", {
     method: "POST",
@@ -33,49 +41,39 @@ const fetchResubscriptionSession = async () => {
 export default function AccessRestricted() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+  const { data: license } = useLicense();
+  const settings = useSettingsContext();
 
-  const handleManageSubscription = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await fetchCustomerPortal();
+  const isSeatLimitExceeded =
+    settings.settings.application_status ===
+    ApplicationStatus.SEAT_LIMIT_EXCEEDED;
+  const hadPreviousLicense = license?.has_license === true;
+  const showRenewalMessage = NEXT_PUBLIC_CLOUD_ENABLED || hadPreviousLicense;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          `Failed to create customer portal session: ${
-            errorData.message || response.statusText
-          }`
-        );
-      }
+  function getSeatLimitMessage() {
+    const { used_seats, seat_count } = settings.settings;
+    const counts =
+      used_seats != null && seat_count != null
+        ? ` (${used_seats} users / ${seat_count} seats)`
+        : "";
+    return `Your organization has exceeded its licensed seat count${counts}. Access is restricted until the number of users is reduced or your license is upgraded.`;
+  }
 
-      const { url } = await response.json();
-
-      if (!url) {
-        throw new Error("No portal URL returned from the server");
-      }
-
-      router.push(url);
-    } catch (error) {
-      console.error("Error creating customer portal session:", error);
-      setError("Error opening customer portal. Please try again later.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const initialModalMessage = isSeatLimitExceeded
+    ? getSeatLimitMessage()
+    : showRenewalMessage
+      ? NEXT_PUBLIC_CLOUD_ENABLED
+        ? "Your access to Onyx has been temporarily suspended due to a lapse in your subscription."
+        : "Your access to Onyx has been temporarily suspended due to a lapse in your license."
+      : "An Enterprise license is required to use Onyx. Your data is protected and will be available once a license is activated.";
 
   const handleResubscribe = async () => {
     setIsLoading(true);
     setError(null);
-    if (!NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-      setError("Stripe public key not found");
-      setIsLoading(false);
-      return;
-    }
     try {
+      const publishableKey = await fetchStripePublishableKey();
       const { sessionId } = await fetchResubscriptionSession();
-      const stripe = await loadStripe(NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
+      const stripe = await loadStripe(publishableKey);
 
       if (stripe) {
         await stripe.redirectToCheckout({ sessionId });
@@ -97,12 +95,34 @@ export default function AccessRestricted() {
         <SvgLock className="stroke-status-error-05 w-[1.5rem] h-[1.5rem]" />
       </div>
 
-      <Text text03>
-        Your access to Onyx has been temporarily suspended due to a lapse in
-        your subscription.
-      </Text>
+      <Text text03>{initialModalMessage}</Text>
 
-      {NEXT_PUBLIC_CLOUD_ENABLED ? (
+      {isSeatLimitExceeded ? (
+        <>
+          <Text text03>
+            If you are an administrator, you can manage users on the{" "}
+            <Link className={linkClassName} href="/admin/users">
+              User Management
+            </Link>{" "}
+            page or upgrade your license on the{" "}
+            <Link className={linkClassName} href="/admin/billing">
+              Admin Billing
+            </Link>{" "}
+            page.
+          </Text>
+
+          <div className="flex flex-row gap-2">
+            <Button
+              onClick={async () => {
+                await logout();
+                window.location.reload();
+              }}
+            >
+              Log out
+            </Button>
+          </div>
+        </>
+      ) : NEXT_PUBLIC_CLOUD_ENABLED ? (
         <>
           <Text text03>
             To reinstate your access and continue benefiting from Onyx&apos;s
@@ -121,13 +141,6 @@ export default function AccessRestricted() {
             </Button>
             <Button
               secondary
-              onClick={handleManageSubscription}
-              disabled={isLoading}
-            >
-              Manage Existing Subscription
-            </Button>
-            <Button
-              secondary
               onClick={async () => {
                 await logout();
                 window.location.reload();
@@ -142,20 +155,22 @@ export default function AccessRestricted() {
       ) : (
         <>
           <Text text03>
-            To reinstate your access and continue using Onyx, please contact
-            your system administrator to renew your license.
+            {hadPreviousLicense
+              ? "To reinstate your access and continue using Onyx, please contact your system administrator to renew your license."
+              : "To get started, please contact your system administrator to obtain an Enterprise license."}
           </Text>
 
           <Text text03>
             If you are the administrator, please visit the{" "}
-            <Link className={linkClassName} href="/ee/admin/billing">
+            <Link className={linkClassName} href="/admin/billing">
               Admin Billing
             </Link>{" "}
-            page to update your license, or reach out to{" "}
+            page to {hadPreviousLicense ? "renew" : "activate"} your license,
+            sign up through Stripe or reach out to{" "}
             <a className={linkClassName} href="mailto:support@onyx.app">
               support@onyx.app
             </a>{" "}
-            to renew your subscription.
+            for billing assistance.
           </Text>
 
           <div className="flex flex-row gap-2">

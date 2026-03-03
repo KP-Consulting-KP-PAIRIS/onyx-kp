@@ -9,8 +9,9 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTasks
 
-from onyx.background.celery.versioned_apps.client import app as client_app
+from onyx.configs.app_configs import DISABLE_VECTOR_DB
 from onyx.configs.constants import FileOrigin
 from onyx.configs.constants import OnyxCeleryPriority
 from onyx.configs.constants import OnyxCeleryQueues
@@ -44,7 +45,7 @@ def build_hashed_file_key(file: UploadFile) -> str:
 def create_user_files(
     files: List[UploadFile],
     project_id: int | None,
-    user: User | None,
+    user: User,
     db_session: Session,
     link_url: str | None = None,
     temp_id_map: dict[str, str] | None = None,
@@ -70,7 +71,7 @@ def create_user_files(
             id_to_temp_id[str(new_id)] = new_temp_id
         new_file = UserFile(
             id=new_id,
-            user_id=user.id if user else None,
+            user_id=user.id,
             file_id=file_path,
             name=file.filename,
             token_count=categorized_files.acceptable_file_to_token_count[
@@ -102,11 +103,11 @@ def create_user_files(
 def upload_files_to_user_files_with_indexing(
     files: List[UploadFile],
     project_id: int | None,
-    user: User | None,
+    user: User,
     temp_id_map: dict[str, str] | None,
     db_session: Session,
+    background_tasks: BackgroundTasks | None = None,
 ) -> CategorizedFilesResult:
-    # Validate project ownership if a project_id is provided
     if project_id is not None and user is not None:
         if not check_project_ownership(project_id, user.id, db_session):
             raise HTTPException(status_code=404, detail="Project not found")
@@ -127,16 +128,27 @@ def upload_files_to_user_files_with_indexing(
         logger.warning(
             f"File {rejected_file.filename} rejected for {rejected_file.reason}"
         )
-    for user_file in user_files:
-        task = client_app.send_task(
-            OnyxCeleryTask.PROCESS_SINGLE_USER_FILE,
-            kwargs={"user_file_id": user_file.id, "tenant_id": tenant_id},
-            queue=OnyxCeleryQueues.USER_FILE_PROCESSING,
-            priority=OnyxCeleryPriority.HIGH,
-        )
-        logger.info(
-            f"Triggered indexing for user_file_id={user_file.id} with task_id={task.id}"
-        )
+
+    if DISABLE_VECTOR_DB and background_tasks is not None:
+        from onyx.background.task_utils import drain_processing_loop
+
+        background_tasks.add_task(drain_processing_loop, tenant_id)
+        for user_file in user_files:
+            logger.info(f"Queued in-process processing for user_file_id={user_file.id}")
+    else:
+        from onyx.background.celery.versioned_apps.client import app as client_app
+
+        for user_file in user_files:
+            task = client_app.send_task(
+                OnyxCeleryTask.PROCESS_SINGLE_USER_FILE,
+                kwargs={"user_file_id": user_file.id, "tenant_id": tenant_id},
+                queue=OnyxCeleryQueues.USER_FILE_PROCESSING,
+                priority=OnyxCeleryPriority.HIGH,
+            )
+            logger.info(
+                f"Triggered indexing for user_file_id={user_file.id} "
+                f"with task_id={task.id}"
+            )
 
     return CategorizedFilesResult(
         user_files=user_files,

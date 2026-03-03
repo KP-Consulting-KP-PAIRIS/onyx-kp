@@ -1,8 +1,8 @@
 "use client";
 
 import { ThreeDotsLoader } from "@/components/Loading";
-import { AdminPageTitle } from "@/components/admin/Title";
 import { errorHandlingFetcher } from "@/lib/fetcher";
+import * as SettingsLayouts from "@/layouts/settings-layouts";
 import Text from "@/components/ui/text";
 import Title from "@/components/ui/title";
 import Button from "@/refresh-components/buttons/Button";
@@ -15,11 +15,14 @@ import {
 import { SavedSearchSettings } from "@/app/admin/embeddings/interfaces";
 import UpgradingPage from "./UpgradingPage";
 import { useContext } from "react";
-import { SettingsContext } from "@/components/settings/SettingsProvider";
+import { SettingsContext } from "@/providers/SettingsProvider";
 import CardSection from "@/components/admin/CardSection";
 import { ErrorCallout } from "@/components/ErrorCallout";
-import { usePopupFromQuery } from "@/components/popup/PopupFromQuery";
-import { SvgSearch } from "@opal/icons";
+import { useToastFromQuery } from "@/hooks/useToast";
+import { ADMIN_ROUTE_CONFIG, ADMIN_PATHS } from "@/lib/admin-routes";
+
+const route = ADMIN_ROUTE_CONFIG[ADMIN_PATHS.SEARCH_SETTINGS]!;
+
 export interface EmbeddingDetails {
   api_key: string;
   custom_config: any;
@@ -29,7 +32,7 @@ export interface EmbeddingDetails {
 
 function Main() {
   const settings = useContext(SettingsContext);
-  const { popup: searchSettingsPopup } = usePopupFromQuery({
+  useToastFromQuery({
     "search-settings": {
       message: `Changed search settings successfully`,
       type: "success",
@@ -80,7 +83,6 @@ function Main() {
 
   return (
     <div>
-      {searchSettingsPopup}
       {!futureEmbeddingModel ? (
         <>
           {settings?.settings.needs_reindexing && (
@@ -105,31 +107,6 @@ function Main() {
                 <div className="px-1 w-full rounded-lg">
                   <div className="space-y-4">
                     <div>
-                      <Text className="font-semibold">Reranking Model</Text>
-                      <Text className="text-text-700">
-                        {searchSettings.rerank_model_name || "Not set"}
-                      </Text>
-                    </div>
-
-                    <div>
-                      <Text className="font-semibold">Results to Rerank</Text>
-                      <Text className="text-text-700">
-                        {searchSettings.num_rerank}
-                      </Text>
-                    </div>
-
-                    <div>
-                      <Text className="font-semibold">
-                        Multilingual Expansion
-                      </Text>
-                      <Text className="text-text-700">
-                        {searchSettings.multilingual_expansion.length > 0
-                          ? searchSettings.multilingual_expansion.join(", ")
-                          : "None"}
-                      </Text>
-                    </div>
-
-                    <div>
                       <Text className="font-semibold">Multipass Indexing</Text>
                       <Text className="text-text-700">
                         {searchSettings.multipass_indexing
@@ -144,17 +121,6 @@ function Main() {
                         {searchSettings.enable_contextual_rag
                           ? "Enabled"
                           : "Disabled"}
-                      </Text>
-                    </div>
-
-                    <div>
-                      <Text className="font-semibold">
-                        Disable Reranking for Streaming
-                      </Text>
-                      <Text className="text-text-700">
-                        {searchSettings.disable_rerank_for_streaming
-                          ? "Yes"
-                          : "No"}
                       </Text>
                     </div>
                   </div>
@@ -178,9 +144,11 @@ function Main() {
 
 export default function Page() {
   return (
-    <>
-      <AdminPageTitle title="Search Settings" icon={SvgSearch} />
-      <Main />
-    </>
+    <SettingsLayouts.Root>
+      <SettingsLayouts.Header title={route.title} icon={route.icon} separator />
+      <SettingsLayouts.Body>
+        <Main />
+      </SettingsLayouts.Body>
+    </SettingsLayouts.Root>
   );
 }

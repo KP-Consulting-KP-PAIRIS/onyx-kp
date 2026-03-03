@@ -6,7 +6,7 @@ import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import PasswordInputTypeIn from "@/refresh-components/inputs/PasswordInputTypeIn";
 import InputComboBox from "@/refresh-components/inputs/InputComboBox";
 import Separator from "@/refresh-components/Separator";
-import { WellKnownLLMProviderDescriptor } from "@/app/admin/configuration/llm/interfaces";
+import { WellKnownLLMProviderDescriptor } from "@/interfaces/llm";
 import {
   OnboardingFormWrapper,
   OnboardingFormChildProps,
@@ -71,7 +71,7 @@ function AzureFormFields(props: OnboardingFormChildProps<AzureFormValues>) {
                 {...field}
                 placeholder="https://your-resource.cognitiveservices.azure.com/openai/deployments/deployment-name/chat/completions?api-version=2025-01-01-preview"
                 showClearButton={false}
-                disabled={disabled}
+                variant={disabled ? "disabled" : undefined}
               />
             </FormField.Control>
             <FormField.Message
@@ -107,9 +107,9 @@ function AzureFormFields(props: OnboardingFormChildProps<AzureFormValues>) {
               <PasswordInputTypeIn
                 {...field}
                 placeholder=""
+                disabled={disabled || !formikProps.values.target_uri?.trim()}
                 error={apiStatus === "error"}
                 showClearButton={false}
-                disabled={disabled || !formikProps.values.target_uri?.trim()}
               />
             </FormField.Control>
             {!showApiMessage && (
@@ -142,7 +142,7 @@ function AzureFormFields(props: OnboardingFormChildProps<AzureFormValues>) {
         )}
       />
 
-      <Separator className="my-0" />
+      <Separator className="py-0" />
 
       <FormikField<string>
         name={FIELD_DEFAULT_MODEL_NAME}

@@ -3,7 +3,7 @@
 import React from "react";
 import type { IconProps } from "@opal/types";
 import Text from "@/refresh-components/texts/Text";
-import Button from "@/refresh-components/buttons/Button";
+import { Button } from "@opal/components";
 import Modal from "@/refresh-components/Modal";
 import { useModalClose } from "../contexts/ModalContext";
 
@@ -16,6 +16,8 @@ export interface ConfirmationModalProps {
   submit: React.ReactNode;
   hideCancel?: boolean;
   onClose?: () => void;
+  /** If false, removes the gray background from the body. Defaults to true. */
+  twoTone?: boolean;
 }
 
 export default function ConfirmationModalLayout({
@@ -27,6 +29,7 @@ export default function ConfirmationModalLayout({
   submit,
   hideCancel,
   onClose: externalOnClose,
+  twoTone = true,
 }: ConfirmationModalProps) {
   const onClose = useModalClose(externalOnClose);
 
@@ -39,7 +42,7 @@ export default function ConfirmationModalLayout({
           description={description}
           onClose={onClose}
         />
-        <Modal.Body>
+        <Modal.Body twoTone={twoTone}>
           {typeof children === "string" ? (
             <Text as="p" text03>
               {children}
@@ -50,7 +53,7 @@ export default function ConfirmationModalLayout({
         </Modal.Body>
         <Modal.Footer>
           {!hideCancel && (
-            <Button secondary onClick={onClose} type="button">
+            <Button prominence="secondary" onClick={onClose}>
               Cancel
             </Button>
           )}

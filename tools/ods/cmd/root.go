@@ -45,7 +45,13 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(NewCherryPickCommand())
 	cmd.AddCommand(NewDBCommand())
 	cmd.AddCommand(NewOpenAPICommand())
+	cmd.AddCommand(NewComposeCommand())
+	cmd.AddCommand(NewLogsCommand())
+	cmd.AddCommand(NewPullCommand())
 	cmd.AddCommand(NewRunCICommand())
+	cmd.AddCommand(NewScreenshotDiffCommand())
+	cmd.AddCommand(NewWebCommand())
+	cmd.AddCommand(NewWhoisCommand())
 
 	return cmd
 }

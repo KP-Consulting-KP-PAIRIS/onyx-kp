@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
-import { MinimalPersonaSnapshot } from "@/app/admin/assistants/interfaces";
+import { useCallback, useMemo, useState } from "react";
 import Modal, { BasicModalFooter } from "@/refresh-components/Modal";
 import Button from "@/refresh-components/buttons/Button";
 import {
   SvgLink,
   SvgOrganization,
   SvgShare,
+  SvgTag,
   SvgUsers,
   SvgX,
 } from "@opal/icons";
+import InputChipField from "@/refresh-components/inputs/InputChipField";
+import Message from "@/refresh-components/messages/Message";
 import Tabs from "@/refresh-components/Tabs";
 import { Card } from "@/refresh-components/cards";
 import InputComboBox from "@/refresh-components/inputs/InputComboBox/InputComboBox";
@@ -20,16 +22,15 @@ import LineItem from "@/refresh-components/buttons/LineItem";
 import { SvgUser } from "@opal/icons";
 import { Section } from "@/layouts/general-layouts";
 import Text from "@/refresh-components/texts/Text";
-import useUsers from "@/hooks/useUsers";
-import useGroups from "@/hooks/useGroups";
+import useShareableUsers from "@/hooks/useShareableUsers";
+import useShareableGroups from "@/hooks/useShareableGroups";
 import { useModal } from "@/refresh-components/contexts/ModalContext";
-import { useUser } from "@/components/user/UserProvider";
+import { useUser } from "@/providers/UserProvider";
 import { Formik, useFormikContext } from "formik";
 import { useAgent } from "@/hooks/useAgents";
-import IconButton from "@/refresh-components/buttons/IconButton";
-import { User } from "@/lib/types";
-import { UserGroup } from "@/lib/types";
-import { FullPersona } from "@/app/admin/assistants/interfaces";
+import { Button as OpalButton } from "@opal/components";
+import { useLabels } from "@/lib/hooks";
+import { PersonaLabel } from "@/app/admin/agents/interfaces";
 
 const YOUR_ORGANIZATION_TAB = "Your Organization";
 const USERS_AND_GROUPS_TAB = "Users & Groups";
@@ -42,11 +43,8 @@ interface ShareAgentFormValues {
   selectedUserIds: string[];
   selectedGroupIds: number[];
   isPublic: boolean;
-}
-
-interface ComboBoxOption {
-  value: string;
-  label: string;
+  isFeatured: boolean;
+  labelIds: number[];
 }
 
 // ============================================================================
@@ -54,48 +52,70 @@ interface ComboBoxOption {
 // ============================================================================
 
 interface ShareAgentFormContentProps {
-  agent?: MinimalPersonaSnapshot;
-  fullAgent: FullPersona | null;
-  usersData: User[];
-  groupsData: UserGroup[];
-  currentUserId: string | undefined;
-  comboBoxOptions: ComboBoxOption[];
-  onClose: () => void;
-  onCopyLink: () => void;
+  agentId?: number;
 }
 
-function ShareAgentFormContent({
-  agent,
-  fullAgent,
-  usersData,
-  groupsData,
-  currentUserId,
-  comboBoxOptions,
-  onClose,
-  onCopyLink,
-}: ShareAgentFormContentProps) {
+function ShareAgentFormContent({ agentId }: ShareAgentFormContentProps) {
   const { values, setFieldValue, handleSubmit, dirty } =
     useFormikContext<ShareAgentFormValues>();
+  const { data: usersData } = useShareableUsers({ includeApiKeys: true });
+  const { data: groupsData } = useShareableGroups();
+  const { user: currentUser, isAdmin, isCurator } = useUser();
+  const { agent: fullAgent } = useAgent(agentId ?? null);
+  const shareAgentModal = useModal();
+  const { labels: allLabels, createLabel } = useLabels();
+  const [labelInputValue, setLabelInputValue] = useState("");
+
+  const acceptedUsers = usersData ?? [];
+  const groups = groupsData ?? [];
+  const canUpdateFeaturedStatus = isAdmin || isCurator;
+
+  // Create options for InputComboBox from all accepted users and groups
+  const comboBoxOptions = useMemo(() => {
+    const userOptions = acceptedUsers
+      .filter((user) => user.id !== currentUser?.id)
+      .map((user) => ({
+        value: `user-${user.id}`,
+        label: user.email,
+      }));
+
+    const groupOptions = groups.map((group) => ({
+      value: `group-${group.id}`,
+      label: group.name,
+    }));
+
+    return [...userOptions, ...groupOptions];
+  }, [acceptedUsers, groups, currentUser?.id]);
 
   // Compute owner and displayed users
   const ownerId = fullAgent?.owner?.id;
   const owner = ownerId
-    ? usersData.find((user) => user.id === ownerId)
-    : usersData.find((user) => user.id === currentUserId);
+    ? acceptedUsers.find((user) => user.id === ownerId)
+    : acceptedUsers.find((user) => user.id === currentUser?.id);
   const otherUsers = owner
-    ? usersData.filter(
+    ? acceptedUsers.filter(
         (user) =>
           user.id !== owner.id && values.selectedUserIds.includes(user.id)
       )
-    : usersData;
+    : acceptedUsers;
   const displayedUsers = [...(owner ? [owner] : []), ...otherUsers];
 
   // Compute displayed groups based on current form values
-  const displayedGroups = groupsData.filter((group) =>
+  const displayedGroups = groups.filter((group) =>
     values.selectedGroupIds.includes(group.id)
   );
 
   // Handlers
+  function handleClose() {
+    shareAgentModal.toggle(false);
+  }
+
+  function handleCopyLink() {
+    if (!agentId) return;
+    const url = `${window.location.origin}/chat?agentId=${agentId}`;
+    navigator.clipboard.writeText(url);
+  }
+
   function handleComboBoxSelect(selectedValue: string) {
     if (selectedValue.startsWith("user-")) {
       const userId = selectedValue.replace("user-", "");
@@ -127,9 +147,53 @@ function ShareAgentFormContent({
     );
   }
 
+  const selectedLabels: PersonaLabel[] = useMemo(() => {
+    if (!allLabels) return [];
+    return allLabels.filter((label) => values.labelIds.includes(label.id));
+  }, [allLabels, values.labelIds]);
+
+  function handleRemoveLabel(labelId: number) {
+    setFieldValue(
+      "labelIds",
+      values.labelIds.filter((id) => id !== labelId)
+    );
+  }
+
+  const addLabel = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+
+      const existing = allLabels?.find(
+        (l) => l.name.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (existing) {
+        if (!values.labelIds.includes(existing.id)) {
+          setFieldValue("labelIds", [...values.labelIds, existing.id]);
+        }
+      } else {
+        const newLabel = await createLabel(trimmed);
+        if (newLabel) {
+          setFieldValue("labelIds", [...values.labelIds, newLabel.id]);
+        }
+      }
+      setLabelInputValue("");
+    },
+    [allLabels, values.labelIds, setFieldValue, createLabel]
+  );
+
+  const chipItems = useMemo(
+    () =>
+      selectedLabels.map((label) => ({
+        id: String(label.id),
+        label: label.name,
+      })),
+    [selectedLabels]
+  );
+
   return (
     <Modal.Content width="sm" height="lg">
-      <Modal.Header icon={SvgShare} title="Share Agent" onClose={onClose} />
+      <Modal.Header icon={SvgShare} title="Share Agent" onClose={handleClose} />
 
       <Modal.Body padding={0.5}>
         <Card variant="borderless" padding={0.5}>
@@ -165,7 +229,7 @@ function ShareAgentFormContent({
                     {/* Shared Users */}
                     {displayedUsers.map((user) => {
                       const isOwner = fullAgent?.owner?.id === user.id;
-                      const isCurrentUser = currentUserId === user.id;
+                      const isCurrentUser = currentUser?.id === user.id;
 
                       return (
                         <LineItem
@@ -173,7 +237,7 @@ function ShareAgentFormContent({
                           icon={SvgUser}
                           description={isCurrentUser ? "You" : undefined}
                           rightChildren={
-                            isOwner || (isCurrentUser && !agent) ? (
+                            isOwner || (isCurrentUser && !agentId) ? (
                               // Owner will always have the agent "shared" with it.
                               // Therefore, we never render any `IconButton SvgX` to remove it.
                               //
@@ -186,8 +250,9 @@ function ShareAgentFormContent({
                             ) : (
                               // For all other cases (including for "self-unsharing"),
                               // we render an `IconButton SvgX` to remove a person from the list.
-                              <IconButton
-                                internal
+                              <OpalButton
+                                prominence="tertiary"
+                                size="sm"
                                 icon={SvgX}
                                 onClick={() => handleRemoveUser(user.id)}
                               />
@@ -205,8 +270,9 @@ function ShareAgentFormContent({
                         key={`group-${group.id}`}
                         icon={SvgUsers}
                         rightChildren={
-                          <IconButton
-                            internal
+                          <OpalButton
+                            prominence="tertiary"
+                            size="sm"
                             icon={SvgX}
                             onClick={() => handleRemoveGroup(group.id)}
                           />
@@ -218,15 +284,56 @@ function ShareAgentFormContent({
                   </Section>
                 )}
               </Section>
+              {values.isPublic && (
+                <Section>
+                  <Message
+                    iconComponent={SvgOrganization}
+                    close={false}
+                    static
+                    className="w-full"
+                    text="This agent is public to your organization."
+                    description="Everyone in your organization has access to this agent."
+                  />
+                </Section>
+              )}
             </Tabs.Content>
 
             <Tabs.Content value={YOUR_ORGANIZATION_TAB} padding={0.5}>
-              <InputLayouts.Horizontal
-                title="Publish This Agent"
-                description="Make this agent available to everyone in your organization."
-              >
-                <SwitchField name="isPublic" />
-              </InputLayouts.Horizontal>
+              <Section gap={1} alignItems="stretch">
+                <InputLayouts.Horizontal
+                  title="Publish This Agent"
+                  description="Make this agent available to everyone in your organization."
+                >
+                  <SwitchField name="isPublic" />
+                </InputLayouts.Horizontal>
+
+                {canUpdateFeaturedStatus && (
+                  <>
+                    <div className="border-t border-border-02" />
+
+                    <InputLayouts.Horizontal
+                      title="Feature This Agent"
+                      description="Show this agent at the top of the explore agents list and automatically pin it to the sidebar for new users with access."
+                    >
+                      <SwitchField name="isFeatured" />
+                    </InputLayouts.Horizontal>
+                  </>
+                )}
+
+                <InputChipField
+                  chips={chipItems}
+                  onRemoveChip={(id) => handleRemoveLabel(Number(id))}
+                  onAdd={addLabel}
+                  value={labelInputValue}
+                  onChange={setLabelInputValue}
+                  placeholder="Add labels..."
+                  icon={SvgTag}
+                />
+                <Text secondaryBody text04>
+                  Add labels and categories to help people better discover this
+                  agent.
+                </Text>
+              </Section>
             </Tabs.Content>
           </Tabs>
         </Card>
@@ -235,20 +342,20 @@ function ShareAgentFormContent({
       <Modal.Footer>
         <BasicModalFooter
           left={
-            agent ? (
-              <Button secondary leftIcon={SvgLink} onClick={onCopyLink}>
+            agentId ? (
+              <Button secondary leftIcon={SvgLink} onClick={handleCopyLink}>
                 Copy Link
               </Button>
             ) : undefined
           }
           cancel={
-            <Button secondary onClick={onClose}>
-              Done
+            <Button secondary onClick={handleClose}>
+              Cancel
             </Button>
           }
           submit={
             <Button onClick={() => handleSubmit()} disabled={!dirty}>
-              Share
+              Save
             </Button>
           }
         />
@@ -262,54 +369,48 @@ function ShareAgentFormContent({
 // ============================================================================
 
 export interface ShareAgentModalProps {
-  agent?: MinimalPersonaSnapshot;
-  onShare?: (userIds: string[], groupIds: number[], isPublic: boolean) => void;
+  agentId?: number;
+  userIds: string[];
+  groupIds: number[];
+  isPublic: boolean;
+  isFeatured: boolean;
+  labelIds: number[];
+  onShare?: (
+    userIds: string[],
+    groupIds: number[],
+    isPublic: boolean,
+    isFeatured: boolean,
+    labelIds: number[]
+  ) => void;
 }
 
 export default function ShareAgentModal({
-  agent,
+  agentId,
+  userIds,
+  groupIds,
+  isPublic,
+  isFeatured,
+  labelIds,
   onShare,
 }: ShareAgentModalProps) {
-  const { data: usersData } = useUsers({ includeApiKeys: false });
-  const { data: groupsData } = useGroups();
-  const { user: currentUser } = useUser();
   const shareAgentModal = useModal();
-  const { agent: fullAgent } = useAgent(agent?.id ?? null);
-
-  // Create options for InputComboBox from all accepted users and groups
-  const comboBoxOptions = useMemo(() => {
-    const userOptions = (usersData?.accepted ?? []).map((user) => ({
-      value: `user-${user.id}`,
-      label: user.email,
-    }));
-
-    const groupOptions = (groupsData ?? []).map((group) => ({
-      value: `group-${group.id}`,
-      label: group.name,
-    }));
-
-    return [...userOptions, ...groupOptions];
-  }, [usersData?.accepted, groupsData]);
 
   const initialValues: ShareAgentFormValues = {
-    selectedUserIds: fullAgent?.users?.map((u) => u.id) ?? [],
-    selectedGroupIds: fullAgent?.groups ?? [],
-    isPublic: fullAgent?.is_public ?? true,
+    selectedUserIds: userIds,
+    selectedGroupIds: groupIds,
+    isPublic: isPublic,
+    isFeatured: isFeatured,
+    labelIds: labelIds,
   };
 
   function handleSubmit(values: ShareAgentFormValues) {
-    onShare?.(values.selectedUserIds, values.selectedGroupIds, values.isPublic);
-    shareAgentModal.toggle(false);
-  }
-
-  function handleClose() {
-    shareAgentModal.toggle(false);
-  }
-
-  function handleCopyLink() {
-    if (!agent?.id) return;
-    const url = `${window.location.origin}/chat?assistantId=${agent.id}`;
-    navigator.clipboard.writeText(url);
+    onShare?.(
+      values.selectedUserIds,
+      values.selectedGroupIds,
+      values.isPublic,
+      values.isFeatured,
+      values.labelIds
+    );
   }
 
   return (
@@ -319,16 +420,7 @@ export default function ShareAgentModal({
         onSubmit={handleSubmit}
         enableReinitialize
       >
-        <ShareAgentFormContent
-          agent={agent}
-          fullAgent={fullAgent}
-          usersData={usersData?.accepted ?? []}
-          groupsData={groupsData ?? []}
-          currentUserId={currentUser?.id}
-          comboBoxOptions={comboBoxOptions}
-          onClose={handleClose}
-          onCopyLink={handleCopyLink}
-        />
+        <ShareAgentFormContent agentId={agentId} />
       </Formik>
     </Modal>
   );

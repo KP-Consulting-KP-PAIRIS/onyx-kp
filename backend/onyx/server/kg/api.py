@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 from onyx.auth.users import current_admin_user
 from onyx.configs.constants import TMP_DRALPHA_PERSONA_NAME
 from onyx.configs.kg_configs import KG_BETA_ASSISTANT_DESCRIPTION
-from onyx.context.search.enums import RecencyBiasSetting
 from onyx.db.engine.sql_engine import get_session
 from onyx.db.entities import get_entity_stats_by_grounded_source_name
 from onyx.db.entity_type import get_configured_entity_types
@@ -48,7 +47,7 @@ admin_router = APIRouter(prefix="/admin/kg")
 
 
 @admin_router.get("/exposed")
-def get_kg_exposed(_: User | None = Depends(current_admin_user)) -> bool:
+def get_kg_exposed(_: User = Depends(current_admin_user)) -> bool:
     kg_config_settings = get_kg_config_settings()
     return kg_config_settings.KG_EXPOSED
 
@@ -58,7 +57,7 @@ def get_kg_exposed(_: User | None = Depends(current_admin_user)) -> bool:
 
 @admin_router.put("/reset")
 def reset_kg(
-    _: User | None = Depends(current_admin_user),
+    _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> SourceAndEntityTypeView:
     reset_full_kg_index__commit(db_session)
@@ -70,7 +69,7 @@ def reset_kg(
 
 
 @admin_router.get("/config")
-def get_kg_config(_: User | None = Depends(current_admin_user)) -> KGConfig:
+def get_kg_config(_: User = Depends(current_admin_user)) -> KGConfig:
     config = get_kg_config_settings()
     return KGConfigAPIModel.from_kg_config_settings(config)
 
@@ -78,7 +77,7 @@ def get_kg_config(_: User | None = Depends(current_admin_user)) -> KGConfig:
 @admin_router.put("/config")
 def enable_or_disable_kg(
     req: EnableKGConfigRequest | DisableKGConfigRequest,
-    user: User | None = Depends(current_admin_user),
+    user: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
     if isinstance(req, DisableKGConfigRequest):
@@ -127,30 +126,23 @@ def enable_or_disable_kg(
             # If persona doesn't exist or can't be restored, create a new one below
             pass
 
-    # Create KG Beta persona
-    user_ids = [user.id] if user else []
-    is_public = len(user_ids) == 0
-
+    # Create KG Beta persona (private to the admin who enabled KG)
     persona_request = PersonaUpsertRequest(
         name=TMP_DRALPHA_PERSONA_NAME,
         description=KG_BETA_ASSISTANT_DESCRIPTION,
         system_prompt=KG_BETA_ASSISTANT_SYSTEM_PROMPT,
         task_prompt=KG_BETA_ASSISTANT_TASK_PROMPT,
         datetime_aware=False,
-        num_chunks=25,
-        llm_relevance_filter=False,
-        is_public=is_public,
-        llm_filter_extraction=False,
-        recency_bias=RecencyBiasSetting.NO_DECAY,
+        is_public=False,
         document_set_ids=[],
         tool_ids=[search_tool.id, kg_tool.id],
         llm_model_provider_override=None,
         llm_model_version_override=None,
         starter_messages=None,
-        users=user_ids,
+        users=[user.id],
         groups=[],
         label_ids=[],
-        is_default_persona=False,
+        featured=False,
         display_priority=0,
         user_file_ids=[],
     )
@@ -171,7 +163,7 @@ def enable_or_disable_kg(
 
 @admin_router.get("/entity-types")
 def get_kg_entity_types(
-    _: User | None = Depends(current_admin_user),
+    _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> SourceAndEntityTypeView:
     # when using for the first time, populate with default entity types
@@ -202,7 +194,7 @@ def get_kg_entity_types(
 @admin_router.put("/entity-types")
 def update_kg_entity_types(
     updates: list[EntityType],
-    _: User | None = Depends(current_admin_user),
+    _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
     update_entity_types_and_related_connectors__commit(

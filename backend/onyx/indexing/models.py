@@ -112,8 +112,13 @@ class DocMetadataAwareIndexChunk(IndexChunk):
     access: "DocumentAccess"
     document_sets: set[str]
     user_project: list[int]
+    personas: list[int]
     boost: int
     aggregated_chunk_boost_factor: float
+    # Full ancestor path from root hierarchy node to document's parent.
+    # Stored as an integer array in OpenSearch for hierarchy-based filtering.
+    # Empty list means no hierarchy info (document excluded from hierarchy searches).
+    ancestor_hierarchy_node_ids: list[int]
 
     @classmethod
     def from_index_chunk(
@@ -122,9 +127,11 @@ class DocMetadataAwareIndexChunk(IndexChunk):
         access: "DocumentAccess",
         document_sets: set[str],
         user_project: list[int],
+        personas: list[int],
         boost: int,
         aggregated_chunk_boost_factor: float,
         tenant_id: str,
+        ancestor_hierarchy_node_ids: list[int] | None = None,
     ) -> "DocMetadataAwareIndexChunk":
         index_chunk_data = index_chunk.model_dump()
         return cls(
@@ -132,9 +139,11 @@ class DocMetadataAwareIndexChunk(IndexChunk):
             access=access,
             document_sets=document_sets,
             user_project=user_project,
+            personas=personas,
             boost=boost,
             aggregated_chunk_boost_factor=aggregated_chunk_boost_factor,
             tenant_id=tenant_id,
+            ancestor_hierarchy_node_ids=ancestor_hierarchy_node_ids or [],
         )
 
 
@@ -156,6 +165,13 @@ class EmbeddingModelDetail(BaseModel):
         cls,
         search_settings: "SearchSettings",
     ) -> "EmbeddingModelDetail":
+        api_key = None
+        if (
+            search_settings.cloud_provider is not None
+            and search_settings.cloud_provider.api_key is not None
+        ):
+            api_key = search_settings.cloud_provider.api_key.get_value(apply_mask=True)
+
         return cls(
             id=search_settings.id,
             model_name=search_settings.model_name,
@@ -163,7 +179,7 @@ class EmbeddingModelDetail(BaseModel):
             query_prefix=search_settings.query_prefix,
             passage_prefix=search_settings.passage_prefix,
             provider_type=search_settings.provider_type,
-            api_key=search_settings.api_key,
+            api_key=api_key,
             api_url=search_settings.api_url,
         )
 

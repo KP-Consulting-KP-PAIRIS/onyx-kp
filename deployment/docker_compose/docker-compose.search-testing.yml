@@ -29,6 +29,8 @@ services:
       - MODEL_SERVER_PORT=${MODEL_SERVER_PORT:-}
       - ENV_SEED_CONFIGURATION=${ENV_SEED_CONFIGURATION:-}
       - ENABLE_PAID_ENTERPRISE_EDITION_FEATURES=True
+      # TODO(Nik): https://linear.app/onyx-app/issue/ENG-1/update-test-infra-to-use-test-license
+      - LICENSE_ENFORCEMENT_ENABLED=false
       # MinIO configuration
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
       - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID:-minioadmin}
@@ -66,6 +68,8 @@ services:
       - INDEXING_MODEL_SERVER_HOST=${INDEXING_MODEL_SERVER_HOST:-indexing_model_server}
       - ENV_SEED_CONFIGURATION=${ENV_SEED_CONFIGURATION:-}
       - ENABLE_PAID_ENTERPRISE_EDITION_FEATURES=True
+      # TODO(Nik): https://linear.app/onyx-app/issue/ENG-1/update-test-infra-to-use-test-license
+      - LICENSE_ENFORCEMENT_ENABLED=false
       # MinIO configuration
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
       - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID:-minioadmin}
@@ -88,7 +92,6 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_DISABLE_LOGOUT=${NEXT_PUBLIC_DISABLE_LOGOUT:-}
-        - NEXT_PUBLIC_DEFAULT_SIDEBAR_OPEN=${NEXT_PUBLIC_DEFAULT_SIDEBAR_OPEN:-}
 
         # Enterprise Edition only
         - NEXT_PUBLIC_THEME=${NEXT_PUBLIC_THEME:-}
@@ -229,7 +232,7 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 30s
       timeout: 20s
       retries: 3

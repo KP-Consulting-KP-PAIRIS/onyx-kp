@@ -8,11 +8,11 @@ import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import PasswordInputTypeIn from "@/refresh-components/inputs/PasswordInputTypeIn";
 import InputComboBox from "@/refresh-components/inputs/InputComboBox";
 import Separator from "@/refresh-components/Separator";
-import IconButton from "@/refresh-components/buttons/IconButton";
+import { Button } from "@opal/components";
 import Tabs from "@/refresh-components/Tabs";
 import { cn, noProp } from "@/lib/utils";
 import { SvgRefreshCw } from "@opal/icons";
-import { WellKnownLLMProviderDescriptor } from "@/app/admin/configuration/llm/interfaces";
+import { WellKnownLLMProviderDescriptor } from "@/interfaces/llm";
 import {
   OnboardingFormWrapper,
   OnboardingFormChildProps,
@@ -139,9 +139,14 @@ function OllamaFormFields({
                   <InputTypeIn
                     {...field}
                     placeholder={OLLAMA_SELF_HOSTED_DEFAULT_URL}
-                    error={apiStatus === "error"}
+                    variant={
+                      disabled
+                        ? "disabled"
+                        : apiStatus === "error"
+                          ? "error"
+                          : undefined
+                    }
                     showClearButton={false}
-                    disabled={disabled}
                   />
                 </FormField.Control>
                 {showApiMessage && (
@@ -166,7 +171,7 @@ function OllamaFormFields({
             )}
           />
 
-          <Separator className="my-0" />
+          <Separator className="py-0" />
 
           <FormikField<string>
             name={FIELD_DEFAULT_MODEL_NAME}
@@ -185,8 +190,9 @@ function OllamaFormFields({
                     options={modelOptions}
                     disabled={disabled || isFetchingModels}
                     rightSection={
-                      <IconButton
-                        internal
+                      <Button
+                        prominence="tertiary"
+                        size="sm"
                         icon={({ className }) => (
                           <SvgRefreshCw
                             className={cn(
@@ -246,9 +252,9 @@ function OllamaFormFields({
                   <PasswordInputTypeIn
                     {...field}
                     placeholder=""
+                    disabled={disabled}
                     error={apiStatus === "error"}
                     showClearButton={false}
-                    disabled={disabled}
                     onBlur={(e) => {
                       field.onBlur(e);
                       if (field.value) {
@@ -287,7 +293,7 @@ function OllamaFormFields({
             )}
           />
 
-          <Separator className="my-0" />
+          <Separator className="py-0" />
 
           <FormikField<string>
             name={FIELD_DEFAULT_MODEL_NAME}
@@ -306,8 +312,9 @@ function OllamaFormFields({
                     options={modelOptions}
                     disabled={disabled || isFetchingModels}
                     rightSection={
-                      <IconButton
-                        internal
+                      <Button
+                        prominence="tertiary"
+                        size="sm"
                         icon={({ className }) => (
                           <SvgRefreshCw
                             className={cn(

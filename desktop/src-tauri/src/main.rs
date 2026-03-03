@@ -20,7 +20,6 @@ use tauri::Wry;
 use tauri::{
     webview::PageLoadPayload, AppHandle, Manager, Webview, WebviewUrl, WebviewWindowBuilder,
 };
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 #[cfg(target_os = "macos")]
 use tokio::time::sleep;
 use url::Url;
@@ -41,19 +40,216 @@ const TRAY_MENU_OPEN_APP_ID: &str = "tray_open_app";
 const TRAY_MENU_OPEN_CHAT_ID: &str = "tray_open_chat";
 const TRAY_MENU_SHOW_IN_BAR_ID: &str = "tray_show_in_menu_bar";
 const TRAY_MENU_QUIT_ID: &str = "tray_quit";
+const MENU_SHOW_MENU_BAR_ID: &str = "show_menu_bar";
+const MENU_HIDE_DECORATIONS_ID: &str = "hide_window_decorations";
+const CHAT_LINK_INTERCEPT_SCRIPT: &str = r##"
+(() => {
+  if (window.__ONYX_CHAT_LINK_INTERCEPT_INSTALLED__) {
+    return;
+  }
+
+  window.__ONYX_CHAT_LINK_INTERCEPT_INSTALLED__ = true;
+
+  function isChatSessionPage() {
+    try {
+      const currentUrl = new URL(window.location.href);
+      return (
+        currentUrl.pathname.startsWith("/app") &&
+        currentUrl.searchParams.has("chatId")
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function getAllowedNavigationUrl(rawUrl) {
+    try {
+      const parsed = new URL(String(rawUrl), window.location.href);
+      const scheme = parsed.protocol.toLowerCase();
+      if (!["http:", "https:", "mailto:", "tel:"].includes(scheme)) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  async function openWithTauri(url) {
+    try {
+      const invoke =
+        window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") {
+        return false;
+      }
+
+      await invoke("open_in_browser", { url });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function handleChatNavigation(rawUrl) {
+    const parsedUrl = getAllowedNavigationUrl(rawUrl);
+    if (!parsedUrl) {
+      return false;
+    }
+
+    const safeUrl = parsedUrl.toString();
+    const scheme = parsedUrl.protocol.toLowerCase();
+    if (scheme === "mailto:" || scheme === "tel:") {
+      void openWithTauri(safeUrl).then((opened) => {
+        if (!opened) {
+          window.location.assign(safeUrl);
+        }
+      });
+      return true;
+    }
+
+    window.location.assign(safeUrl);
+    return true;
+  }
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!isChatSessionPage() || event.defaultPrevented) {
+        return;
+      }
+
+      const element = event.target;
+      if (!(element instanceof Element)) {
+        return;
+      }
+
+      const anchor = element.closest("a");
+      if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      const target = (anchor.getAttribute("target") || "").toLowerCase();
+      if (target !== "_blank") {
+        return;
+      }
+
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#")) {
+        return;
+      }
+
+      if (!handleChatNavigation(href)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    true
+  );
+
+  const nativeWindowOpen = window.open;
+  window.open = function(url, target, features) {
+    const resolvedTarget = typeof target === "string" ? target.toLowerCase() : "";
+    const shouldNavigateInPlace = resolvedTarget === "" || resolvedTarget === "_blank";
+
+    if (
+      isChatSessionPage() &&
+      shouldNavigateInPlace &&
+      url != null &&
+      String(url).length > 0
+    ) {
+      if (!handleChatNavigation(url)) {
+        return null;
+      }
+      return null;
+    }
+
+    if (typeof nativeWindowOpen === "function") {
+      return nativeWindowOpen.call(window, url, target, features);
+    }
+    return null;
+  };
+})();
+"##;
+
+#[cfg(not(target_os = "macos"))]
+const MENU_KEY_HANDLER_SCRIPT: &str = r#"
+(() => {
+  if (window.__ONYX_MENU_KEY_HANDLER__) return;
+  window.__ONYX_MENU_KEY_HANDLER__ = true;
+
+  let altHeld = false;
+
+  function invoke(cmd) {
+    const fn_ =
+      window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
+    if (typeof fn_ === 'function') fn_(cmd);
+  }
+
+  function releaseAltAndHideMenu() {
+    if (!altHeld) {
+      return;
+    }
+    altHeld = false;
+    invoke('hide_menu_bar_temporary');
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Alt') {
+      if (!altHeld) {
+        altHeld = true;
+        invoke('show_menu_bar_temporarily');
+      }
+      return;
+    }
+    if (e.altKey && e.key === 'F1') {
+      e.preventDefault();
+      e.stopPropagation();
+      altHeld = false;
+      invoke('toggle_menu_bar');
+      return;
+    }
+  }, true);
+
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'Alt' && altHeld) {
+      releaseAltAndHideMenu();
+    }
+  }, true);
+
+  window.addEventListener('blur', () => {
+    releaseAltAndHideMenu();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      releaseAltAndHideMenu();
+    }
+  });
+})();
+"#;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
-    /// The Onyx server URL (default: https://cloud.onyx.app)
     pub server_url: String,
 
-    /// Optional: Custom window title
     #[serde(default = "default_window_title")]
     pub window_title: String,
+
+    #[serde(default = "default_show_menu_bar")]
+    pub show_menu_bar: bool,
+
+    #[serde(default)]
+    pub hide_window_decorations: bool,
 }
 
 fn default_window_title() -> String {
     "Onyx".to_string()
+}
+
+fn default_show_menu_bar() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -61,6 +257,8 @@ impl Default for AppConfig {
         Self {
             server_url: DEFAULT_SERVER_URL.to_string(),
             window_title: default_window_title(),
+            show_menu_bar: true,
+            hide_window_decorations: false,
         }
     }
 }
@@ -76,39 +274,25 @@ fn get_config_path() -> Option<PathBuf> {
 }
 
 /// Load config from file, or create default if it doesn't exist
-fn load_config() -> AppConfig {
+fn load_config() -> (AppConfig, bool) {
     let config_path = match get_config_path() {
         Some(path) => path,
         None => {
-            eprintln!("Could not determine config directory, using defaults");
-            return AppConfig::default();
+            return (AppConfig::default(), false);
         }
     };
 
-    if config_path.exists() {
-        match fs::read_to_string(&config_path) {
-            Ok(contents) => match serde_json::from_str(&contents) {
-                Ok(config) => {
-                    return config;
-                }
-                Err(e) => {
-                    eprintln!("Failed to parse config: {}, using defaults", e);
-                }
-            },
-            Err(e) => {
-                eprintln!("Failed to read config: {}, using defaults", e);
-            }
-        }
-    } else {
-        // Create default config file
-        if let Err(e) = save_config(&AppConfig::default()) {
-            eprintln!("Failed to create default config: {}", e);
-        } else {
-            println!("Created default config at {:?}", config_path);
-        }
+    if !config_path.exists() {
+        return (AppConfig::default(), false);
     }
 
-    AppConfig::default()
+    match fs::read_to_string(&config_path) {
+        Ok(contents) => match serde_json::from_str(&contents) {
+            Ok(config) => (config, true),
+            Err(_) => (AppConfig::default(), false),
+        },
+        Err(_) => (AppConfig::default(), false),
+    }
 }
 
 /// Save config to file
@@ -128,7 +312,12 @@ fn save_config(config: &AppConfig) -> Result<(), String> {
 }
 
 // Global config state
-struct ConfigState(RwLock<AppConfig>);
+struct ConfigState {
+    config: RwLock<AppConfig>,
+    config_initialized: RwLock<bool>,
+    app_base_url: RwLock<Option<Url>>,
+    menu_temporarily_visible: RwLock<bool>,
+}
 
 fn focus_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -142,7 +331,7 @@ fn focus_main_window(app: &AppHandle) {
 
 fn trigger_new_chat(app: &AppHandle) {
     let state = app.state::<ConfigState>();
-    let server_url = state.0.read().unwrap().server_url.clone();
+    let server_url = state.config.read().unwrap().server_url.clone();
 
     if let Some(window) = app.get_webview_window("main") {
         let url = format!("{}/chat", server_url);
@@ -152,7 +341,7 @@ fn trigger_new_chat(app: &AppHandle) {
 
 fn trigger_new_window(app: &AppHandle) {
     let state = app.state::<ConfigState>();
-    let server_url = state.0.read().unwrap().server_url.clone();
+    let server_url = state.config.read().unwrap().server_url.clone();
     let handle = app.clone();
 
     tauri::async_runtime::spawn(async move {
@@ -182,28 +371,100 @@ fn trigger_new_window(app: &AppHandle) {
                 inject_titlebar(window.clone());
             }
 
+            apply_settings_to_window(&handle, &window);
             let _ = window.set_focus();
         }
     });
 }
 
 fn open_docs() {
-    let url = "https://docs.onyx.app";
+    let _ = open_in_default_browser("https://docs.onyx.app");
+}
+
+fn open_settings(app: &AppHandle) {
+    // Navigate main window to the settings page (index.html) with settings flag
+    let state = app.state::<ConfigState>();
+    let settings_url = state
+        .app_base_url
+        .read()
+        .unwrap()
+        .as_ref()
+        .cloned()
+        .and_then(|mut url| {
+            url.set_query(None);
+            url.set_fragment(Some("settings"));
+            url.set_path("/");
+            Some(url)
+        })
+        .or_else(|| Url::parse("tauri://localhost/#settings").ok());
+
+    if let Some(window) = app.get_webview_window("main") {
+        if let Some(url) = settings_url {
+            let _ = window.navigate(url);
+        }
+    }
+}
+
+fn same_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn is_chat_session_url(url: &Url) -> bool {
+    url.path().starts_with("/app") && url.query_pairs().any(|(key, _)| key == "chatId")
+}
+
+fn should_open_in_external_browser(current_url: &Url, destination_url: &Url) -> bool {
+    if !is_chat_session_url(current_url) {
+        return false;
+    }
+
+    match destination_url.scheme() {
+        "mailto" | "tel" => true,
+        "http" | "https" => !same_origin(current_url, destination_url),
+        _ => false,
+    }
+}
+
+fn open_in_default_browser(url: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("open").arg(url).status();
+        return Command::new("open").arg(url).status().is_ok();
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("xdg-open").arg(url).status();
+        return Command::new("xdg-open").arg(url).status().is_ok();
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("rundll32")
+        return Command::new("rundll32")
             .arg("url.dll,FileProtocolHandler")
             .arg(url)
-            .status();
+            .status()
+            .is_ok();
     }
+    #[allow(unreachable_code)]
+    false
+}
+
+#[tauri::command]
+fn open_in_browser(url: String) -> Result<(), String> {
+    let parsed_url = Url::parse(&url).map_err(|_| "Invalid URL".to_string())?;
+    match parsed_url.scheme() {
+        "http" | "https" | "mailto" | "tel" => {}
+        _ => return Err("Unsupported URL scheme".to_string()),
+    }
+
+    if open_in_default_browser(parsed_url.as_str()) {
+        Ok(())
+    } else {
+        Err("Failed to open URL in default browser".to_string())
+    }
+}
+
+fn inject_chat_link_intercept(webview: &Webview) {
+    let _ = webview.eval(CHAT_LINK_INTERCEPT_SCRIPT);
 }
 
 // ============================================================================
@@ -213,7 +474,27 @@ fn open_docs() {
 /// Get the current server URL
 #[tauri::command]
 fn get_server_url(state: tauri::State<ConfigState>) -> String {
-    state.0.read().unwrap().server_url.clone()
+    state.config.read().unwrap().server_url.clone()
+}
+
+#[derive(Serialize)]
+struct BootstrapState {
+    server_url: String,
+    config_exists: bool,
+}
+
+/// Get the server URL plus whether a config file exists
+#[tauri::command]
+fn get_bootstrap_state(state: tauri::State<ConfigState>) -> BootstrapState {
+    let server_url = state.config.read().unwrap().server_url.clone();
+    let config_initialized = *state.config_initialized.read().unwrap();
+    let config_exists =
+        config_initialized && get_config_path().map(|path| path.exists()).unwrap_or(false);
+
+    BootstrapState {
+        server_url,
+        config_exists,
+    }
 }
 
 /// Set a new server URL and save to config
@@ -224,9 +505,10 @@ fn set_server_url(state: tauri::State<ConfigState>, url: String) -> Result<Strin
         return Err("URL must start with http:// or https://".to_string());
     }
 
-    let mut config = state.0.write().unwrap();
+    let mut config = state.config.write().unwrap();
     config.server_url = url.trim_end_matches('/').to_string();
     save_config(&config)?;
+    *state.config_initialized.write().unwrap() = true;
 
     Ok(config.server_url.clone())
 }
@@ -315,7 +597,7 @@ fn open_config_directory() -> Result<(), String> {
 /// Navigate to a specific path on the configured server
 #[tauri::command]
 fn navigate_to(window: tauri::WebviewWindow, state: tauri::State<ConfigState>, path: &str) {
-    let base_url = state.0.read().unwrap().server_url.clone();
+    let base_url = state.config.read().unwrap().server_url.clone();
     let url = format!("{}{}", base_url, path);
     let _ = window.eval(&format!("window.location.href = '{}'", url));
 }
@@ -341,7 +623,7 @@ fn go_forward(window: tauri::WebviewWindow) {
 /// Open a new window
 #[tauri::command]
 async fn new_window(app: AppHandle, state: tauri::State<'_, ConfigState>) -> Result<(), String> {
-    let server_url = state.0.read().unwrap().server_url.clone();
+    let server_url = state.config.read().unwrap().server_url.clone();
     let window_label = format!("onyx-{}", uuid::Uuid::new_v4());
 
     let builder = WebviewWindowBuilder::new(
@@ -366,18 +648,15 @@ async fn new_window(app: AppHandle, state: tauri::State<'_, ConfigState>) -> Res
     #[cfg(target_os = "linux")]
     let builder = builder.background_color(tauri::window::Color(0x1a, 0x1a, 0x2e, 0xff));
 
+    let window = builder.build().map_err(|e| e.to_string())?;
+
     #[cfg(target_os = "macos")]
     {
-        let window = builder.build().map_err(|e| e.to_string())?;
-        // Apply vibrancy effect and inject titlebar
         let _ = apply_vibrancy(&window, NSVisualEffectMaterial::Sidebar, None, None);
         inject_titlebar(window.clone());
     }
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _window = builder.build().map_err(|e| e.to_string())?;
-    }
+    apply_settings_to_window(&app, &window);
 
     Ok(())
 }
@@ -385,9 +664,10 @@ async fn new_window(app: AppHandle, state: tauri::State<'_, ConfigState>) -> Res
 /// Reset config to defaults
 #[tauri::command]
 fn reset_config(state: tauri::State<ConfigState>) -> Result<(), String> {
-    let mut config = state.0.write().unwrap();
+    let mut config = state.config.write().unwrap();
     *config = AppConfig::default();
     save_config(&config)?;
+    *state.config_initialized.write().unwrap() = true;
     Ok(())
 }
 
@@ -413,71 +693,139 @@ async fn start_drag_window(window: tauri::Window) -> Result<(), String> {
 }
 
 // ============================================================================
-// Shortcuts Setup
+// Window Settings
 // ============================================================================
 
-fn setup_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let new_chat = Shortcut::new(Some(Modifiers::SUPER), Code::KeyN);
-    let reload = Shortcut::new(Some(Modifiers::SUPER), Code::KeyR);
-    let back = Shortcut::new(Some(Modifiers::SUPER), Code::BracketLeft);
-    let forward = Shortcut::new(Some(Modifiers::SUPER), Code::BracketRight);
-    let new_window_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyN);
-    let show_app = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
-    let open_settings = Shortcut::new(Some(Modifiers::SUPER), Code::Comma);
-
-    let app_handle = app.clone();
-
-    // Avoid hijacking the system-wide Cmd+R on macOS.
-    #[cfg(target_os = "macos")]
-    let shortcuts = [
-        new_chat,
-        back,
-        forward,
-        new_window_shortcut,
-        show_app,
-        open_settings,
-    ];
-
-    #[cfg(not(target_os = "macos"))]
-    let shortcuts = [
-        new_chat,
-        reload,
-        back,
-        forward,
-        new_window_shortcut,
-        show_app,
-        open_settings,
-    ];
-
-    app.global_shortcut().on_shortcuts(
-        shortcuts,
-        move |_app, shortcut, _event| {
-            if shortcut == &new_chat {
-                trigger_new_chat(&app_handle);
-            }
-
-            if let Some(window) = app_handle.get_webview_window("main") {
-                if shortcut == &reload {
-                    let _ = window.eval("window.location.reload()");
-                } else if shortcut == &back {
-                    let _ = window.eval("window.history.back()");
-                } else if shortcut == &forward {
-                    let _ = window.eval("window.history.forward()");
-                } else if shortcut == &open_settings {
-                    // Open config file for editing
-                    let _ = open_config_file();
+fn find_check_menu_item(
+    app: &AppHandle,
+    id: &str,
+) -> Option<CheckMenuItem<tauri::Wry>> {
+    let menu = app.menu()?;
+    for item in menu.items().ok()? {
+        if let Some(submenu) = item.as_submenu() {
+            for sub_item in submenu.items().ok()? {
+                if let Some(check) = sub_item.as_check_menuitem() {
+                    if check.id().as_ref() == id {
+                        return Some(check.clone());
+                    }
                 }
             }
+        }
+    }
+    None
+}
 
-            if shortcut == &new_window_shortcut {
-                trigger_new_window(&app_handle);
-            } else if shortcut == &show_app {
-                focus_main_window(&app_handle);
-            }
-        },
-    )?;
+fn apply_settings_to_window(app: &AppHandle, window: &tauri::WebviewWindow) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    let state = app.state::<ConfigState>();
+    let config = state.config.read().unwrap();
+    let temp_visible = *state.menu_temporarily_visible.read().unwrap();
+    if !config.show_menu_bar && !temp_visible {
+        let _ = window.hide_menu();
+    }
+    if config.hide_window_decorations {
+        let _ = window.set_decorations(false);
+    }
+}
 
-    Ok(())
+fn handle_menu_bar_toggle(app: &AppHandle) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    let state = app.state::<ConfigState>();
+    let show = {
+        let mut config = state.config.write().unwrap();
+        config.show_menu_bar = !config.show_menu_bar;
+        let _ = save_config(&config);
+        config.show_menu_bar
+    };
+
+    *state.menu_temporarily_visible.write().unwrap() = false;
+
+    for (_, window) in app.webview_windows() {
+        if show {
+            let _ = window.show_menu();
+        } else {
+            let _ = window.hide_menu();
+        }
+    }
+}
+
+fn handle_decorations_toggle(app: &AppHandle) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    let state = app.state::<ConfigState>();
+    let hide = {
+        let mut config = state.config.write().unwrap();
+        config.hide_window_decorations = !config.hide_window_decorations;
+        let _ = save_config(&config);
+        config.hide_window_decorations
+    };
+
+    for (_, window) in app.webview_windows() {
+        let _ = window.set_decorations(!hide);
+    }
+}
+
+#[tauri::command]
+fn toggle_menu_bar(app: AppHandle) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    handle_menu_bar_toggle(&app);
+
+    let state = app.state::<ConfigState>();
+    let checked = state.config.read().unwrap().show_menu_bar;
+    if let Some(check) = find_check_menu_item(&app, MENU_SHOW_MENU_BAR_ID) {
+        let _ = check.set_checked(checked);
+    }
+}
+
+#[tauri::command]
+fn show_menu_bar_temporarily(app: AppHandle) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    let state = app.state::<ConfigState>();
+    if state.config.read().unwrap().show_menu_bar {
+        return;
+    }
+
+    let mut temp = state.menu_temporarily_visible.write().unwrap();
+    if *temp {
+        return;
+    }
+    *temp = true;
+    drop(temp);
+
+    for (_, window) in app.webview_windows() {
+        let _ = window.show_menu();
+    }
+}
+
+#[tauri::command]
+fn hide_menu_bar_temporary(app: AppHandle) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    let state = app.state::<ConfigState>();
+    let mut temp = state.menu_temporarily_visible.write().unwrap();
+    if !*temp {
+        return;
+    }
+    *temp = false;
+    drop(temp);
+
+    if state.config.read().unwrap().show_menu_bar {
+        return;
+    }
+
+    for (_, window) in app.webview_windows() {
+        let _ = window.hide_menu();
+    }
 }
 
 // ============================================================================
@@ -495,6 +843,13 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         true,
         Some("CmdOrCtrl+Shift+N"),
     )?;
+    let settings_item = MenuItem::with_id(
+        app,
+        "open_settings",
+        "Settings...",
+        true,
+        Some("CmdOrCtrl+Comma"),
+    )?;
     let docs_item = MenuItem::with_id(app, "open_docs", "Onyx Documentation", true, None::<&str>)?;
 
     if let Some(file_menu) = menu
@@ -503,16 +858,70 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
         .filter_map(|item| item.as_submenu().cloned())
         .find(|submenu| submenu.text().ok().as_deref() == Some("File"))
     {
-        file_menu.insert_items(&[&new_chat_item, &new_window_item], 0)?;
+        file_menu.insert_items(&[&new_chat_item, &new_window_item, &settings_item], 0)?;
     } else {
         let file_menu = SubmenuBuilder::new(app, "File")
             .items(&[
                 &new_chat_item,
                 &new_window_item,
+                &settings_item,
                 &PredefinedMenuItem::close_window(app, None)?,
             ])
             .build()?;
         menu.prepend(&file_menu)?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let config = app.state::<ConfigState>();
+        let config_guard = config.config.read().unwrap();
+
+        let show_menu_bar_item = CheckMenuItem::with_id(
+            app,
+            MENU_SHOW_MENU_BAR_ID,
+            "Show Menu Bar",
+            true,
+            config_guard.show_menu_bar,
+            None::<&str>,
+        )?;
+
+        let hide_decorations_item = CheckMenuItem::with_id(
+            app,
+            MENU_HIDE_DECORATIONS_ID,
+            "Hide Window Decorations",
+            true,
+            config_guard.hide_window_decorations,
+            None::<&str>,
+        )?;
+
+        drop(config_guard);
+
+        if let Some(window_menu) = menu
+            .items()?
+            .into_iter()
+            .filter_map(|item| item.as_submenu().cloned())
+            .find(|submenu| submenu.text().ok().as_deref() == Some("Window"))
+        {
+            window_menu.append(&show_menu_bar_item)?;
+            window_menu.append(&hide_decorations_item)?;
+        } else {
+            let window_menu = SubmenuBuilder::new(app, "Window")
+                .item(&show_menu_bar_item)
+                .item(&hide_decorations_item)
+                .build()?;
+
+            let items = menu.items()?;
+            let help_idx = items
+                .iter()
+                .position(|item| {
+                    item.as_submenu()
+                        .and_then(|s| s.text().ok())
+                        .as_deref()
+                        == Some("Help")
+                })
+                .unwrap_or(items.len());
+            menu.insert(&window_menu, help_idx)?;
+        }
     }
 
     if let Some(help_menu) = menu
@@ -532,13 +941,7 @@ fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
-    let open_app = MenuItem::with_id(
-        app,
-        TRAY_MENU_OPEN_APP_ID,
-        "Open Onyx",
-        true,
-        Some("CmdOrCtrl+Shift+Space"),
-    )?;
+    let open_app = MenuItem::with_id(app, TRAY_MENU_OPEN_APP_ID, "Open Onyx", true, None::<&str>)?;
     let open_chat = MenuItem::with_id(
         app,
         TRAY_MENU_OPEN_CHAT_ID,
@@ -625,24 +1028,44 @@ fn setup_tray_icon(app: &AppHandle) -> tauri::Result<()> {
 
 fn main() {
     // Load config at startup
-    let config = load_config();
-    let server_url = config.server_url.clone();
-
-    println!("Starting Onyx Desktop");
-    println!("Server URL: {}", server_url);
-    if let Some(path) = get_config_path() {
-        println!("Config file: {:?}", path);
-    }
+    let (config, config_initialized) = load_config();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri::plugin::Builder::<Wry>::new("chat-external-navigation-handler")
+                .on_navigation(|webview, destination_url| {
+                    let Ok(current_url) = webview.url() else {
+                        return true;
+                    };
+
+                    if should_open_in_external_browser(&current_url, destination_url) {
+                        if !open_in_default_browser(destination_url.as_str()) {
+                            eprintln!(
+                                "Failed to open external URL in default browser: {}",
+                                destination_url
+                            );
+                        }
+                        return false;
+                    }
+
+                    true
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .manage(ConfigState(RwLock::new(config)))
+        .manage(ConfigState {
+            config: RwLock::new(config),
+            config_initialized: RwLock::new(config_initialized),
+            app_base_url: RwLock::new(None),
+            menu_temporarily_visible: RwLock::new(false),
+        })
         .invoke_handler(tauri::generate_handler![
             get_server_url,
+            get_bootstrap_state,
             set_server_url,
             get_config_path_cmd,
+            open_in_browser,
             open_config_file,
             open_config_directory,
             navigate_to,
@@ -651,21 +1074,22 @@ fn main() {
             go_forward,
             new_window,
             reset_config,
-            start_drag_window
+            start_drag_window,
+            toggle_menu_bar,
+            show_menu_bar_temporarily,
+            hide_menu_bar_temporary
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open_docs" => open_docs(),
             "new_chat" => trigger_new_chat(app),
             "new_window" => trigger_new_window(app),
+            "open_settings" => open_settings(app),
+            "show_menu_bar" => handle_menu_bar_toggle(app),
+            "hide_window_decorations" => handle_decorations_toggle(app),
             _ => {}
         })
         .setup(move |app| {
             let app_handle = app.handle();
-
-            // Setup global shortcuts
-            if let Err(e) = setup_shortcuts(&app_handle) {
-                eprintln!("Failed to setup shortcuts: {}", e);
-            }
 
             if let Err(e) = setup_app_menu(&app_handle) {
                 eprintln!("Failed to setup menu: {}", e);
@@ -675,7 +1099,7 @@ fn main() {
                 eprintln!("Failed to setup tray icon: {}", e);
             }
 
-            // Update main window URL to configured server and inject title bar
+            // Setup main window with vibrancy effect
             if let Some(window) = app.get_webview_window("main") {
                 // Apply vibrancy effect for translucent glass look
                 #[cfg(target_os = "macos")]
@@ -683,28 +1107,50 @@ fn main() {
                     let _ = apply_vibrancy(&window, NSVisualEffectMaterial::Sidebar, None, None);
                 }
 
-                if let Ok(target) = Url::parse(&server_url) {
-                    if let Ok(current) = window.url() {
-                        if current != target {
-                            let _ = window.navigate(target);
-                        }
-                    } else {
-                        let _ = window.navigate(target);
-                    }
+                if let Ok(url) = window.url() {
+                    let mut base_url = url;
+                    base_url.set_query(None);
+                    base_url.set_fragment(None);
+                    base_url.set_path("/");
+                    *app.state::<ConfigState>().app_base_url.write().unwrap() = Some(base_url);
                 }
 
                 #[cfg(target_os = "macos")]
                 inject_titlebar(window.clone());
+
+                apply_settings_to_window(&app_handle, &window);
 
                 let _ = window.set_focus();
             }
 
             Ok(())
         })
-        .on_page_load(|_webview: &Webview, _payload: &PageLoadPayload| {
-            // Re-inject titlebar after every navigation/page load (macOS only)
+        .on_page_load(|webview: &Webview, _payload: &PageLoadPayload| {
+            inject_chat_link_intercept(webview);
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = webview.eval(MENU_KEY_HANDLER_SCRIPT);
+
+                let app = webview.app_handle();
+                let state = app.state::<ConfigState>();
+                let config = state.config.read().unwrap();
+                let temp_visible = *state.menu_temporarily_visible.read().unwrap();
+                let label = webview.label().to_string();
+                if !config.show_menu_bar && !temp_visible {
+                    if let Some(win) = app.get_webview_window(&label) {
+                        let _ = win.hide_menu();
+                    }
+                }
+                if config.hide_window_decorations {
+                    if let Some(win) = app.get_webview_window(&label) {
+                        let _ = win.set_decorations(false);
+                    }
+                }
+            }
+
             #[cfg(target_os = "macos")]
-            let _ = _webview.eval(TITLEBAR_SCRIPT);
+            let _ = webview.eval(TITLEBAR_SCRIPT);
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

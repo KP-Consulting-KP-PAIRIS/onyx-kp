@@ -1,6 +1,8 @@
 import { cn } from "@/lib/utils";
 import Text from "@/refresh-components/texts/Text";
+import Truncated from "@/refresh-components/texts/Truncated";
 import { WithoutStyles } from "@/types";
+import { Content } from "@opal/layouts";
 import { IconProps } from "@opal/types";
 import React from "react";
 
@@ -25,12 +27,12 @@ const alignClassMap: Record<AlignItems, string> = {
   end: "items-end",
   stretch: "items-stretch",
 };
-const widthClassmap: Record<Length, string> = {
-  auto: "w-auto",
-  fit: "w-fit",
+export const widthClassmap: Record<Length, string> = {
+  auto: "w-auto flex-shrink-0",
+  fit: "w-fit flex-shrink-0",
   full: "w-full",
 };
-const heightClassmap: Record<Length, string> = {
+export const heightClassmap: Record<Length, string> = {
   auto: "h-auto",
   fit: "h-fit",
   full: "h-full",
@@ -108,6 +110,23 @@ export interface SectionProps
 
   ref?: React.Ref<HTMLDivElement>;
 }
+
+/**
+ * WARNING: Do NOT wrap Section with the `<Disabled>` component.
+ *
+ * The `<Disabled>` component uses Radix Slot which injects a `className` prop.
+ * Since `Section` spreads `...rest` after setting its own `className`, the injected
+ * className will overwrite all layout classes (flex, flex-col, etc.), breaking the layout.
+ *
+ * To disable content within a Section, wrap the individual children instead:
+ * ```tsx
+ * <Section>
+ *   <Disabled disabled={!isEnabled}>
+ *     <Button>...</Button>
+ *   </Disabled>
+ * </Section>
+ * ```
+ */
 function Section({
   flexDirection = "column",
   justifyContent = "center",
@@ -142,124 +161,122 @@ function Section({
   );
 }
 
-/**
- * LineItemLayout - A layout for icon + title + description rows
- *
- * Structure:
- *   Flexbox Row [
- *     Grid [
- *       [Icon] [Title      ]
- *       [    ] [Description]
- *     ],
- *     rightChildren
- *   ]
- *
- * - Icon column auto-sizes to icon width
- * - Icon vertically centers with title
- * - Description aligns with title's left edge (both in grid column 2)
- * - rightChildren is outside the grid, in the outer flexbox
- *
- * Variants:
- * - `primary`: Standard size (20px icon) with emphasized text. The default for prominent list items.
- * - `secondary`: Compact size (16px icon) with standard text. Use for denser lists or nested items.
- * - `tertiary`: Compact size (16px icon) with standard text. Use for less prominent items in tight layouts.
- * - `tertiary-muted`: Compact size (16px icon) with muted text styling. Use for de-emphasized or secondary information.
- *
- * @param icon - Optional icon component to display on the left
- * @param title - The main title text (required)
- * @param description - Optional description text below the title
- * @param rightChildren - Optional content to render on the right side
- * @param variant - Visual variant. Default: "primary"
- * @param strikethrough - If true, applies line-through style to title. Default: false
- * @param loading - If true, renders skeleton placeholders instead of content. Default: false
- * @param center - If true, vertically centers items; otherwise aligns to start. Default: false
- */
-type LineItemLayoutVariant =
-  | "primary"
-  | "secondary"
-  | "tertiary"
-  | "tertiary-muted";
-export interface LineItemLayoutProps {
-  icon?: React.FunctionComponent<IconProps>;
+export interface AttachmentItemLayoutProps {
   title: string;
-  description?: string;
+  description: string;
+  icon: React.FunctionComponent<IconProps>;
+  middleText?: string;
   rightChildren?: React.ReactNode;
-
-  variant?: LineItemLayoutVariant;
-  strikethrough?: boolean;
-  loading?: boolean;
-  center?: boolean;
-  rightChildrenReducedPadding?: boolean;
 }
-function LineItemLayout({
-  icon: Icon,
+function AttachmentItemLayout({
   title,
   description,
+  icon: Icon,
+  middleText,
   rightChildren,
-
-  variant = "primary",
-  strikethrough,
-  loading,
-  center,
-  rightChildrenReducedPadding,
-}: LineItemLayoutProps) {
-  // Derive styling from variant
-  const isCompact =
-    variant === "secondary" ||
-    variant === "tertiary" ||
-    variant === "tertiary-muted";
-  const isMuted = variant === "tertiary-muted";
-
+}: AttachmentItemLayoutProps) {
   return (
-    <Section
-      flexDirection="row"
-      justifyContent="between"
-      alignItems={center ? "center" : "start"}
-    >
-      <div
-        className="line-item-layout"
-        data-variant={variant}
-        data-has-icon={Icon ? "true" : undefined}
-        data-loading={loading ? "true" : undefined}
-        data-right-children-reduced-padding={
-          rightChildrenReducedPadding ? "true" : undefined
-        }
-      >
-        {/* Row 1: Icon, Title */}
-        {Icon && (
-          <Icon size={isCompact ? 16 : 20} className="line-item-layout-icon" />
-        )}
-        {loading ? (
-          <div className="line-item-layout-skeleton-title" />
-        ) : (
-          <Text
-            mainContentEmphasis={!isCompact}
-            text03={isMuted}
-            className={cn(strikethrough && "line-through")}
-          >
-            {title}
-          </Text>
-        )}
-
-        {/* Row 2: Description (column 2, or column 1 if no icon) */}
-        {loading && description ? (
-          <div className="line-item-layout-skeleton-description" />
-        ) : description ? (
-          <div className="line-item-layout-description">
-            <Text secondaryBody text03>
-              {description}
-            </Text>
+    <Section flexDirection="row" gap={0.25} padding={0.25}>
+      <div className={cn("h-[2.25rem] aspect-square rounded-08")}>
+        <Section>
+          <div className="attachment-button__icon-wrapper">
+            <Icon className="attachment-button__icon" />
           </div>
-        ) : undefined}
+        </Section>
       </div>
-
-      {loading && rightChildren ? (
-        <div className="line-item-layout-skeleton-right" />
-      ) : rightChildren ? (
-        <div className="flex-shrink-0">{rightChildren}</div>
-      ) : undefined}
+      <Section
+        flexDirection="row"
+        justifyContent="between"
+        alignItems="center"
+        gap={1.5}
+      >
+        <Content
+          title={title}
+          description={description}
+          sizePreset="main-ui"
+          variant="section"
+        />
+        {middleText && (
+          <div className="flex-1">
+            <Truncated text03 secondaryBody>
+              {middleText}
+            </Truncated>
+          </div>
+        )}
+        {rightChildren && (
+          <div className="flex-shrink-0 px-1">{rightChildren}</div>
+        )}
+      </Section>
     </Section>
   );
 }
 
-export { Section, LineItemLayout };
+/**
+ * CardItemLayout - A layout for card headers with icon, title, description, and actions
+ *
+ * Structure:
+ *   Column [
+ *     Row [
+ *       Row [ Icon (18px), Title ],
+ *       rightChildren (action buttons)
+ *     ],
+ *     Description (optional, 2-line clamp)
+ *   ]
+ *
+ * Used for card components that display an entity with:
+ * - An icon on the left (18px, controlled by this layout)
+ * - A title next to the icon
+ * - Optional action buttons on the right
+ * - Optional description below (2-line max)
+ *
+ * @param icon - Icon component to render on the left. Receives `size` prop from layout.
+ *               Use a callback for custom components: `(props) => <AgentAvatar {...props} />`
+ * @param title - The main title text
+ * @param description - Optional description text below the title row (clamped to 2 lines)
+ * @param rightChildren - Optional content on the right (typically action buttons)
+ */
+export interface CardItemLayoutProps {
+  icon: React.FunctionComponent<IconProps>;
+  title: string;
+  description?: string;
+  rightChildren?: React.ReactNode;
+}
+function CardItemLayout({
+  icon: Icon,
+  title,
+  description,
+  rightChildren,
+}: CardItemLayoutProps) {
+  return (
+    <div className="flex flex-col flex-1 self-stretch items-center gap-1 p-1">
+      <div className="flex flex-row self-stretch items-center justify-between gap-1">
+        <div className="flex flex-row items-center self-stretch p-1.5 gap-1.5">
+          <div className="px-0.5">
+            <Icon size={18} />
+          </div>
+          <Truncated mainContentBody>{title}</Truncated>
+        </div>
+
+        {rightChildren && (
+          <div className={cn("flex flex-row p-0.5 items-center")}>
+            {rightChildren}
+          </div>
+        )}
+      </div>
+
+      {description && (
+        <div className="pb-1 px-2 flex self-stretch">
+          <Text
+            as="p"
+            secondaryBody
+            text03
+            className="line-clamp-2 truncate whitespace-normal h-[2.2rem] break-words"
+          >
+            {description}
+          </Text>
+        </div>
+      )}
+    </div>
+  );
+}
+export { Section, CardItemLayout, AttachmentItemLayout };

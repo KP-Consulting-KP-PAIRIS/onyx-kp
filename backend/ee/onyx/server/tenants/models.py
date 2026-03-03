@@ -42,6 +42,12 @@ class BillingInformation(BaseModel):
     payment_method_enabled: bool
 
 
+class CreateCheckoutSessionRequest(BaseModel):
+    billing_period: Literal["monthly", "annual"] = "monthly"
+    seats: int | None = None
+    email: str | None = None
+
+
 class CheckoutSessionCreationResponse(BaseModel):
     id: str
 
@@ -105,3 +111,7 @@ class PendingUserSnapshot(BaseModel):
 
 class ApproveUserRequest(BaseModel):
     email: str
+
+
+class StripePublishableKeyResponse(BaseModel):
+    publishable_key: str

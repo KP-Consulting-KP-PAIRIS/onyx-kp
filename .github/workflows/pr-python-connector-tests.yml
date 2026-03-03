@@ -65,7 +65,7 @@ env:
   ZENDESK_TOKEN: ${{ secrets.ZENDESK_TOKEN }}
 
   # Salesforce
-  SF_USERNAME: ${{ secrets.SF_USERNAME }}
+  SF_USERNAME: ${{ vars.SF_USERNAME }}
   SF_PASSWORD: ${{ secrets.SF_PASSWORD }}
   SF_SECURITY_TOKEN: ${{ secrets.SF_SECURITY_TOKEN }}
 
@@ -89,6 +89,10 @@ env:
   SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
   SHAREPOINT_CLIENT_DIRECTORY_ID: ${{ vars.SHAREPOINT_CLIENT_DIRECTORY_ID }}
   SHAREPOINT_SITE: ${{ vars.SHAREPOINT_SITE }}
+  PERM_SYNC_SHAREPOINT_CLIENT_ID: ${{ secrets.PERM_SYNC_SHAREPOINT_CLIENT_ID }}
+  PERM_SYNC_SHAREPOINT_PRIVATE_KEY: ${{ secrets.PERM_SYNC_SHAREPOINT_PRIVATE_KEY }}
+  PERM_SYNC_SHAREPOINT_CERTIFICATE_PASSWORD: ${{ secrets.PERM_SYNC_SHAREPOINT_CERTIFICATE_PASSWORD }}
+  PERM_SYNC_SHAREPOINT_DIRECTORY_ID: ${{ secrets.PERM_SYNC_SHAREPOINT_DIRECTORY_ID }}
 
   # Github
   ACCESS_TOKEN_GITHUB: ${{ secrets.ACCESS_TOKEN_GITHUB }}
@@ -109,6 +113,9 @@ env:
 
   # Slack
   SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+
+  # Discord
+  DISCORD_CONNECTOR_BOT_TOKEN: ${{ secrets.DISCORD_CONNECTOR_BOT_TOKEN }}
 
   # Teams
   TEAMS_APPLICATION_ID: ${{ secrets.TEAMS_APPLICATION_ID }}
@@ -139,7 +146,7 @@ jobs:
       - uses: runs-on/action@cd2b598b0515d39d78c38a02d529db87d2196d1e # ratchet:runs-on/action@v2
 
       - name: Checkout code
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # ratchet:actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
         with:
           persist-credentials: false
 

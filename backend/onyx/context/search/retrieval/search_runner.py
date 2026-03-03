@@ -14,52 +14,15 @@ from onyx.context.search.utils import get_query_embedding
 from onyx.context.search.utils import inference_section_from_chunks
 from onyx.document_index.interfaces import DocumentIndex
 from onyx.document_index.interfaces import VespaChunkRequest
+from onyx.federated_connectors.federated_retrieval import FederatedRetrievalInfo
 from onyx.federated_connectors.federated_retrieval import (
     get_federated_retrieval_functions,
 )
+from onyx.natural_language_processing.search_nlp_models import EmbeddingModel
 from onyx.utils.logger import setup_logger
 from onyx.utils.threadpool_concurrency import run_functions_tuples_in_parallel
 
 logger = setup_logger()
-
-
-def _dedupe_chunks(
-    chunks: list[InferenceChunk],
-) -> list[InferenceChunk]:
-    used_chunks: dict[tuple[str, int], InferenceChunk] = {}
-    for chunk in chunks:
-        key = (chunk.document_id, chunk.chunk_id)
-        if key not in used_chunks:
-            used_chunks[key] = chunk
-        else:
-            stored_chunk_score = used_chunks[key].score or 0
-            this_chunk_score = chunk.score or 0
-            if stored_chunk_score < this_chunk_score:
-                used_chunks[key] = chunk
-
-    return list(used_chunks.values())
-
-
-def download_nltk_data() -> None:
-    import nltk  # type: ignore[import-untyped]
-
-    resources = {
-        "stopwords": "corpora/stopwords",
-        # "wordnet": "corpora/wordnet",  # Not in use
-        "punkt_tab": "tokenizers/punkt_tab",
-    }
-
-    for resource_name, resource_path in resources.items():
-        try:
-            nltk.data.find(resource_path)
-            logger.info(f"{resource_name} is already downloaded.")
-        except LookupError:
-            try:
-                logger.info(f"Downloading {resource_name}...")
-                nltk.download(resource_name, quiet=True)
-                logger.info(f"{resource_name} downloaded successfully.")
-            except Exception as e:
-                logger.error(f"Failed to download {resource_name}. Error: {e}")
 
 
 def combine_retrieval_results(
@@ -89,9 +52,14 @@ def combine_retrieval_results(
 def _embed_and_search(
     query_request: ChunkIndexRequest,
     document_index: DocumentIndex,
-    db_session: Session,
+    db_session: Session | None = None,
+    embedding_model: EmbeddingModel | None = None,
 ) -> list[InferenceChunk]:
-    query_embedding = get_query_embedding(query_request.query, db_session)
+    query_embedding = get_query_embedding(
+        query_request.query,
+        db_session=db_session,
+        embedding_model=embedding_model,
+    )
 
     hybrid_alpha = query_request.hybrid_alpha or HYBRID_ALPHA
 
@@ -108,7 +76,6 @@ def _embed_and_search(
             if hybrid_alpha <= 0.3
             else QueryExpansionType.SEMANTIC
         ),
-        offset=query_request.offset or 0,
     )
 
     return top_chunks
@@ -118,7 +85,9 @@ def search_chunks(
     query_request: ChunkIndexRequest,
     user_id: UUID | None,
     document_index: DocumentIndex,
-    db_session: Session,
+    db_session: Session | None = None,
+    embedding_model: EmbeddingModel | None = None,
+    prefetched_federated_retrieval_infos: list[FederatedRetrievalInfo] | None = None,
 ) -> list[InferenceChunk]:
     run_queries: list[tuple[Callable, tuple]] = []
 
@@ -128,14 +97,22 @@ def search_chunks(
         else None
     )
 
-    # Federated retrieval
-    federated_retrieval_infos = get_federated_retrieval_functions(
-        db_session=db_session,
-        user_id=user_id,
-        source_types=list(source_filters) if source_filters else None,
-        document_set_names=query_request.filters.document_set,
-        user_file_ids=query_request.filters.user_file_ids,
-    )
+    # Federated retrieval — use pre-fetched if available, otherwise query DB
+    if prefetched_federated_retrieval_infos is not None:
+        federated_retrieval_infos = prefetched_federated_retrieval_infos
+    else:
+        if db_session is None:
+            raise ValueError(
+                "Either db_session or prefetched_federated_retrieval_infos "
+                "must be provided"
+            )
+        federated_retrieval_infos = get_federated_retrieval_functions(
+            db_session=db_session,
+            user_id=user_id,
+            source_types=list(source_filters) if source_filters else None,
+            document_set_names=query_request.filters.document_set,
+            user_file_ids=query_request.filters.user_file_ids,
+        )
 
     federated_sources = set(
         federated_retrieval_info.source.to_non_federated_source()
@@ -154,7 +131,10 @@ def search_chunks(
 
     if normal_search_enabled:
         run_queries.append(
-            (_embed_and_search, (query_request, document_index, db_session))
+            (
+                _embed_and_search,
+                (query_request, document_index, db_session, embedding_model),
+            )
         )
 
     parallel_search_results = run_functions_tuples_in_parallel(run_queries)

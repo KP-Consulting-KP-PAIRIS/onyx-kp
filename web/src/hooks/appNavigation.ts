@@ -1,6 +1,6 @@
 "use client";
 
-import { SEARCH_PARAM_NAMES } from "@/app/chat/services/searchParams";
+import { SEARCH_PARAM_NAMES } from "@/app/app/services/searchParams";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Route } from "next";
 import { useCallback } from "react";
@@ -9,18 +9,12 @@ interface UseAppRouterProps {
   chatSessionId?: string;
   agentId?: number;
   projectId?: number;
-  assistantId?: number;
 }
 
 export function useAppRouter() {
   const router = useRouter();
   return useCallback(
-    ({
-      chatSessionId,
-      agentId,
-      projectId,
-      assistantId,
-    }: UseAppRouterProps = {}) => {
+    ({ chatSessionId, agentId, projectId }: UseAppRouterProps = {}) => {
       const finalParams = [];
 
       if (chatSessionId)
@@ -29,11 +23,9 @@ export function useAppRouter() {
         finalParams.push(`${SEARCH_PARAM_NAMES.PERSONA_ID}=${agentId}`);
       else if (projectId)
         finalParams.push(`${SEARCH_PARAM_NAMES.PROJECT_ID}=${projectId}`);
-      else if (assistantId)
-        finalParams.push(`${SEARCH_PARAM_NAMES.PERSONA_ID}=${assistantId}`);
 
       const finalString = finalParams.join("&");
-      const finalUrl = `/chat?${finalString}`;
+      const finalUrl = `/app?${finalString}`;
 
       router.push(finalUrl as Route);
     },

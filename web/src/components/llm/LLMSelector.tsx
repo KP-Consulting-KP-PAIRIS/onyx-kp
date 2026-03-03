@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { parseLlmDescriptor, structureValue } from "@/lib/llm/utils";
-import { LLMProviderDescriptor } from "@/app/admin/configuration/llm/interfaces";
+import { parseLlmDescriptor, structureValue } from "@/lib/llmConfig/utils";
+import { DefaultModel, LLMProviderDescriptor } from "@/interfaces/llm";
 import { getProviderIcon } from "@/app/admin/configuration/llm/utils";
 import InputSelect from "@/refresh-components/inputs/InputSelect";
 import { createIcon } from "@/components/icons/icons";
@@ -20,8 +20,10 @@ interface LLMOption {
 }
 
 export interface LLMSelectorProps {
+  name?: string;
   userSettings?: boolean;
   llmProviders: LLMProviderDescriptor[];
+  defaultText?: DefaultModel | null;
   currentLlm: string | null;
   onSelect: (value: string | null) => void;
   requiresImageGeneration?: boolean;
@@ -29,8 +31,10 @@ export interface LLMSelectorProps {
 }
 
 export default function LLMSelector({
+  name,
   userSettings,
   llmProviders,
+  defaultText,
   currentLlm,
   onSelect,
   requiresImageGeneration,
@@ -137,11 +141,11 @@ export default function LLMSelector({
     });
   }, [llmOptions]);
 
-  const defaultProvider = llmProviders.find(
-    (llmProvider) => llmProvider.is_default_provider
-  );
+  const defaultProvider = defaultText
+    ? llmProviders.find((p) => p.id === defaultText.provider_id)
+    : undefined;
 
-  const defaultModelName = defaultProvider?.default_model_name;
+  const defaultModelName = defaultText?.model_name;
   const defaultModelConfig = defaultProvider?.model_configurations.find(
     (m) => m.name === defaultModelName
   );
@@ -158,9 +162,9 @@ export default function LLMSelector({
       value={currentLlm ? currentLlm : "default"}
       onValueChange={(value) => onSelect(value === "default" ? null : value)}
     >
-      <InputSelect.Trigger placeholder={defaultLabel} />
+      <InputSelect.Trigger id={name} name={name} placeholder={defaultLabel} />
 
-      <InputSelect.Content className="min-w-[280px]">
+      <InputSelect.Content>
         {!excludePublicProviders && (
           <InputSelect.Item
             value="default"
