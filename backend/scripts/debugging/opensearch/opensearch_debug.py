@@ -2,9 +2,10 @@
 """A utility to interact with OpenSearch.
 
 Usage:
-    python3 opensearch_debug.py --help
-    python3 opensearch_debug.py list
-    python3 opensearch_debug.py delete <index_name>
+    source .venv/bin/activate
+    python backend/scripts/debugging/opensearch/opensearch_debug.py --help
+    python backend/scripts/debugging/opensearch/opensearch_debug.py list
+    python backend/scripts/debugging/opensearch/opensearch_debug.py delete <index_name>
 
 Environment Variables:
     OPENSEARCH_HOST: OpenSearch host
@@ -64,29 +65,25 @@ def main() -> None:
     def add_standard_arguments(parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
             "--host",
-            help="OpenSearch host. If not provided, will fall back to OPENSEARCH_HOST, then prompt "
-            "for input.",
+            help="OpenSearch host. If not provided, will fall back to OPENSEARCH_HOST, then prompt for input.",
             type=str,
             default=os.environ.get("OPENSEARCH_HOST", ""),
         )
         parser.add_argument(
             "--port",
-            help="OpenSearch port. If not provided, will fall back to OPENSEARCH_REST_API_PORT, "
-            "then prompt for input.",
+            help="OpenSearch port. If not provided, will fall back to OPENSEARCH_REST_API_PORT, then prompt for input.",
             type=int,
             default=int(os.environ.get("OPENSEARCH_REST_API_PORT", 0)),
         )
         parser.add_argument(
             "--username",
-            help="OpenSearch username. If not provided, will fall back to OPENSEARCH_ADMIN_USERNAME, "
-            "then prompt for input.",
+            help="OpenSearch username. If not provided, will fall back to OPENSEARCH_ADMIN_USERNAME, then prompt for input.",
             type=str,
             default=os.environ.get("OPENSEARCH_ADMIN_USERNAME", ""),
         )
         parser.add_argument(
             "--password",
-            help="OpenSearch password. If not provided, will fall back to OPENSEARCH_ADMIN_PASSWORD, "
-            "then prompt for input.",
+            help="OpenSearch password. If not provided, will fall back to OPENSEARCH_ADMIN_PASSWORD, then prompt for input.",
             type=str,
             default=os.environ.get("OPENSEARCH_ADMIN_PASSWORD", ""),
         )
@@ -111,16 +108,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="A utility to interact with OpenSearch."
     )
+    add_standard_arguments(parser)
     subparsers = parser.add_subparsers(
         dest="command", help="Command to execute.", required=True
     )
 
-    list_parser = subparsers.add_parser("list", help="List all indices with info.")
-    add_standard_arguments(list_parser)
+    subparsers.add_parser("list", help="List all indices with info.")
 
     delete_parser = subparsers.add_parser("delete", help="Delete an index.")
     delete_parser.add_argument("index", help="Index name.", type=str)
-    add_standard_arguments(delete_parser)
 
     args = parser.parse_args()
 

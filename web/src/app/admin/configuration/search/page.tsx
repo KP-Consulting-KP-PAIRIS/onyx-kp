@@ -3,7 +3,7 @@
 import { ThreeDotsLoader } from "@/components/Loading";
 import { errorHandlingFetcher } from "@/lib/fetcher";
 import * as SettingsLayouts from "@/layouts/settings-layouts";
-import Text from "@/components/ui/text";
+import { Text } from "@opal/components";
 import Title from "@/components/ui/title";
 import { Button } from "@opal/components";
 import useSWR from "swr";
@@ -19,9 +19,9 @@ import { SettingsContext } from "@/providers/SettingsProvider";
 import CardSection from "@/components/admin/CardSection";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import { useToastFromQuery } from "@/hooks/useToast";
-import { ADMIN_ROUTE_CONFIG, ADMIN_PATHS } from "@/lib/admin-routes";
+import { ADMIN_ROUTES } from "@/lib/admin-routes";
 
-const route = ADMIN_ROUTE_CONFIG[ADMIN_PATHS.SEARCH_SETTINGS]!;
+const route = ADMIN_ROUTES.INDEX_SETTINGS;
 
 export interface EmbeddingDetails {
   api_key: string;
@@ -107,8 +107,10 @@ function Main() {
                 <div className="px-1 w-full rounded-lg">
                   <div className="space-y-4">
                     <div>
-                      <Text className="font-semibold">Multipass Indexing</Text>
-                      <Text className="text-text-700">
+                      <Text as="p" font="main-ui-action">
+                        Multipass Indexing
+                      </Text>
+                      <Text as="p">
                         {searchSettings.multipass_indexing
                           ? "Enabled"
                           : "Disabled"}
@@ -116,8 +118,10 @@ function Main() {
                     </div>
 
                     <div>
-                      <Text className="font-semibold">Contextual RAG</Text>
-                      <Text className="text-text-700">
+                      <Text as="p" font="main-ui-action">
+                        Contextual RAG
+                      </Text>
+                      <Text as="p">
                         {searchSettings.enable_contextual_rag
                           ? "Enabled"
                           : "Disabled"}
@@ -131,7 +135,7 @@ function Main() {
 
           <div className="mt-4">
             <Button variant="action" href="/admin/embeddings">
-              Update Search Settings
+              Update Index Settings
             </Button>
           </div>
         </>

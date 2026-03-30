@@ -1,5 +1,6 @@
 import { Button } from "@opal/components";
-import Text from "@/components/ui/text";
+import { Disabled } from "@opal/core";
+import { Text } from "@opal/components";
 
 import { FaNewspaper, FaTrash } from "react-icons/fa";
 import { TextFormField, TypedFileUploadFormField } from "@/components/Field";
@@ -50,7 +51,7 @@ export default function EditCredential({
 
   return (
     <div className="flex flex-col gap-y-6">
-      <Text>
+      <Text as="p">
         Ensure that you update to a credential with the proper permissions!
       </Text>
 
@@ -96,9 +97,11 @@ export default function EditCredential({
               <Button onClick={() => resetForm()} icon={SvgTrash}>
                 Reset Changes
               </Button>
-              <Button type="submit" disabled={isSubmitting} icon={FaNewspaper}>
-                Update
-              </Button>
+              <Disabled disabled={isSubmitting}>
+                <Button type="submit" icon={FaNewspaper}>
+                  Update
+                </Button>
+              </Disabled>
             </div>
           </Form>
         )}

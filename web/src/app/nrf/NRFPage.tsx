@@ -40,7 +40,7 @@ import { SvgUser, SvgMenu, SvgAlertTriangle } from "@opal/icons";
 import { useAppBackground } from "@/providers/AppBackgroundProvider";
 import { MinimalOnyxDocument } from "@/lib/search/interfaces";
 import DocumentsSidebar from "@/sections/document-sidebar/DocumentsSidebar";
-import TextViewModal from "@/sections/modals/TextViewModal";
+import PreviewModal from "@/sections/modals/PreviewModal";
 import { personaIncludesRetrieval } from "@/app/app/services/lib";
 import { useQueryController } from "@/providers/QueryControllerProvider";
 import { eeGated } from "@/ce";
@@ -175,7 +175,7 @@ export default function NRFPage({ isSidePanel = false }: NRFPageProps) {
   const isStreaming = currentChatState === "streaming";
 
   // Query controller for search/chat classification (EE feature)
-  const { submit: submitQuery, classification } = useQueryController();
+  const { submit: submitQuery, state } = useQueryController();
 
   // Determine if retrieval (search) is enabled based on the agent
   const retrievalEnabled = useMemo(() => {
@@ -186,7 +186,8 @@ export default function NRFPage({ isSidePanel = false }: NRFPageProps) {
   }, [liveAgent]);
 
   // Check if we're in search mode
-  const isSearch = classification === "search";
+  const isSearch =
+    state.phase === "searching" || state.phase === "search-results";
 
   // Anchor for scroll positioning (matches ChatPage pattern)
   const anchorMessage = messageHistory.at(-2) ?? messageHistory[0];
@@ -295,7 +296,6 @@ export default function NRFPage({ isSidePanel = false }: NRFPageProps) {
       // If we already have messages (chat session started), always use chat mode
       // (matches AppPage behavior where existing sessions bypass classification)
       if (hasMessages) {
-        resetInputBar();
         onSubmit({
           message: submittedMessage,
           currentMessageFiles: currentMessageFiles,
@@ -307,7 +307,6 @@ export default function NRFPage({ isSidePanel = false }: NRFPageProps) {
 
       // Build an onChat closure that captures additionalContext for this submission
       const onChat = (chatMessage: string) => {
-        resetInputBar();
         onSubmit({
           message: chatMessage,
           currentMessageFiles: currentMessageFiles,
@@ -317,7 +316,7 @@ export default function NRFPage({ isSidePanel = false }: NRFPageProps) {
       };
 
       // Use submitQuery which will classify the query and either:
-      // - Route to search (sets classification to "search" and shows SearchUI)
+      // - Route to search (sets phase to "searching"/"search-results" and shows SearchUI)
       // - Route to chat (calls onChat callback)
       await submitQuery(submittedMessage, onChat);
     },
@@ -326,7 +325,6 @@ export default function NRFPage({ isSidePanel = false }: NRFPageProps) {
       onSubmit,
       currentMessageFiles,
       deepResearchEnabled,
-      resetInputBar,
       submitQuery,
       tabReadingEnabled,
       currentTabUrl,
@@ -537,7 +535,7 @@ export default function NRFPage({ isSidePanel = false }: NRFPageProps) {
 
       {/* Text/document preview modal */}
       {presentingDocument && (
-        <TextViewModal
+        <PreviewModal
           presentingDocument={presentingDocument}
           onClose={() => setPresentingDocument(null)}
         />

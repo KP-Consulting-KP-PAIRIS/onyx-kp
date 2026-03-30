@@ -1,3 +1,8 @@
+import type {
+  OnboardingState,
+  OnboardingActions,
+} from "@/interfaces/onboarding";
+
 export enum LLMProviderName {
   OPENAI = "openai",
   ANTHROPIC = "anthropic",
@@ -7,6 +12,8 @@ export enum LLMProviderName {
   OPENROUTER = "openrouter",
   VERTEX_AI = "vertex_ai",
   BEDROCK = "bedrock",
+  LITELLM_PROXY = "litellm_proxy",
+  BIFROST = "bifrost",
   CUSTOM = "custom",
 }
 
@@ -108,11 +115,22 @@ export interface LLMProviderResponse<T> {
   default_vision: DefaultModel | null;
 }
 
+export type LLMModalVariant = "onboarding" | "llm-configuration";
+
 export interface LLMProviderFormProps {
+  variant?: LLMModalVariant;
   existingLlmProvider?: LLMProviderView;
   shouldMarkAsDefault?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+
+  /** The current default model name for this provider (from the global default). */
+  defaultModelName?: string;
+
+  // Onboarding-specific (only when variant === "onboarding")
+  onboardingState?: OnboardingState;
+  onboardingActions?: OnboardingActions;
+  llmDescriptor?: WellKnownLLMProviderDescriptor;
 }
 
 // Param types for model fetching functions - use snake_case to match API structure
@@ -130,6 +148,43 @@ export interface OllamaFetchParams {
   signal?: AbortSignal;
 }
 
+export interface OpenRouterFetchParams {
+  api_base?: string;
+  api_key?: string;
+  provider_name?: string;
+}
+
+export interface LiteLLMProxyFetchParams {
+  api_base?: string;
+  api_key?: string;
+  provider_name?: string;
+  signal?: AbortSignal;
+}
+
+export interface LiteLLMProxyModelResponse {
+  provider_name: string;
+  model_name: string;
+}
+
+export interface BifrostFetchParams {
+  api_base?: string;
+  api_key?: string;
+  provider_name?: string;
+  signal?: AbortSignal;
+}
+
+export interface BifrostModelResponse {
+  name: string;
+  display_name: string;
+  max_input_tokens: number | null;
+  supports_image_input: boolean;
+  supports_reasoning: boolean;
+}
+
+export interface VertexAIFetchParams {
+  model_configurations?: ModelConfiguration[];
+}
+
 export interface LMStudioFetchParams {
   api_base?: string;
   api_key?: string;
@@ -138,19 +193,11 @@ export interface LMStudioFetchParams {
   signal?: AbortSignal;
 }
 
-export interface OpenRouterFetchParams {
-  api_base?: string;
-  api_key?: string;
-  provider_name?: string;
-}
-
-export interface VertexAIFetchParams {
-  model_configurations?: ModelConfiguration[];
-}
-
 export type FetchModelsParams =
   | BedrockFetchParams
   | OllamaFetchParams
-  | LMStudioFetchParams
   | OpenRouterFetchParams
-  | VertexAIFetchParams;
+  | LiteLLMProxyFetchParams
+  | BifrostFetchParams
+  | VertexAIFetchParams
+  | LMStudioFetchParams;

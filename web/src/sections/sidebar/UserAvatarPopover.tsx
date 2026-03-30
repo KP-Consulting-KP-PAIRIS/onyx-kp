@@ -1,18 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { ANONYMOUS_USER_NAME, LOGOUT_DISABLED } from "@/lib/constants";
+import { LOGOUT_DISABLED } from "@/lib/constants";
 import { Notification } from "@/interfaces/settings";
 import useSWR, { preload } from "swr";
 import { errorHandlingFetcher } from "@/lib/fetcher";
-import { checkUserIsNoAuthUser, logout } from "@/lib/user";
+import { checkUserIsNoAuthUser, getUserDisplayName, logout } from "@/lib/user";
 import { useUser } from "@/providers/UserProvider";
-import InputAvatar from "@/refresh-components/inputs/InputAvatar";
-import Text from "@/refresh-components/texts/Text";
 import LineItem from "@/refresh-components/buttons/LineItem";
 import Popover, { PopoverMenu } from "@/refresh-components/Popover";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { cn } from "@/lib/utils";
 import SidebarTab from "@/refresh-components/buttons/SidebarTab";
 import NotificationsPopover from "@/sections/sidebar/NotificationsPopover";
 import {
@@ -26,20 +23,7 @@ import { Section } from "@/layouts/general-layouts";
 import { toast } from "@/hooks/useToast";
 import useAppFocus from "@/hooks/useAppFocus";
 import { useVectorDbEnabled } from "@/providers/SettingsProvider";
-
-function getDisplayName(email?: string, personalName?: string): string {
-  // Prioritize custom personal name if set
-  if (personalName && personalName.trim()) {
-    return personalName.trim();
-  }
-
-  // Fallback to email-derived username
-  if (!email) return ANONYMOUS_USER_NAME;
-  const atIndex = email.indexOf("@");
-  if (atIndex <= 0) return ANONYMOUS_USER_NAME;
-
-  return email.substring(0, atIndex);
-}
+import UserAvatar from "@/refresh-components/avatars/UserAvatar";
 
 interface SettingsPopoverProps {
   onUserSettingsClick: () => void;
@@ -164,7 +148,6 @@ export default function UserAvatarPopover({
     "Settings" | "Notifications" | undefined
   >(undefined);
   const { user } = useUser();
-  const router = useRouter();
   const appFocus = useAppFocus();
   const vectorDbEnabled = useVectorDbEnabled();
 
@@ -175,7 +158,7 @@ export default function UserAvatarPopover({
     errorHandlingFetcher
   );
 
-  const displayName = getDisplayName(user?.email, user?.personalization?.name);
+  const userDisplayName = getUserDisplayName(user);
   const undismissedCount =
     notifications?.filter((n) => !n.dismissed).length ?? 0;
   const hasNotifications = undismissedCount > 0;
@@ -200,18 +183,10 @@ export default function UserAvatarPopover({
       <Popover.Trigger asChild>
         <div id="onyx-user-dropdown">
           <SidebarTab
-            icon={({ className }) => (
-              <InputAvatar
-                className={cn(
-                  "flex items-center justify-center bg-background-neutral-inverted-00",
-                  className,
-                  "w-5 h-5"
-                )}
-              >
-                <Text as="p" inverted secondaryBody>
-                  {displayName[0]?.toUpperCase()}
-                </Text>
-              </InputAvatar>
+            icon={() => (
+              <div className="w-[16px] flex flex-col justify-center items-center">
+                <UserAvatar user={user} size={18} />
+              </div>
             )}
             rightChildren={
               hasNotifications ? (
@@ -220,18 +195,11 @@ export default function UserAvatarPopover({
                 </Section>
               ) : undefined
             }
+            type="button"
             selected={!!popupState || appFocus.isUserSettings()}
             folded={folded}
-            // TODO (@raunakab)
-            //
-            // The internals of `SidebarTab` (`Interactive.Base`) was designed such that providing an `onClick` or `href` would trigger rendering a `cursor-pointer`.
-            // However, since instance is wired up as a "trigger", it doesn't have either of those explicitly specified.
-            // Therefore, the default cursor would be rendered.
-            //
-            // Specifying a dummy `onClick` handler solves that.
-            onClick={() => undefined}
           >
-            {displayName}
+            {userDisplayName}
           </SidebarTab>
         </div>
       </Popover.Trigger>

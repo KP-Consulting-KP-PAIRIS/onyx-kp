@@ -1,11 +1,12 @@
 import * as SettingsLayouts from "@/layouts/settings-layouts";
 import { CUSTOM_ANALYTICS_ENABLED } from "@/lib/constants";
 import { Callout } from "@/components/ui/callout";
-import { ADMIN_ROUTE_CONFIG, ADMIN_PATHS } from "@/lib/admin-routes";
-import Text from "@/components/ui/text";
+import { ADMIN_ROUTES } from "@/lib/admin-routes";
+import { Text } from "@opal/components";
+import Spacer from "@/refresh-components/Spacer";
 import { CustomAnalyticsUpdateForm } from "./CustomAnalyticsUpdateForm";
 
-const route = ADMIN_ROUTE_CONFIG[ADMIN_PATHS.CUSTOM_ANALYTICS]!;
+const route = ADMIN_ROUTES.CUSTOM_ANALYTICS;
 
 function Main() {
   if (!CUSTOM_ANALYTICS_ENABLED) {
@@ -24,11 +25,12 @@ function Main() {
 
   return (
     <div>
-      <Text className="mb-8">
-        This allows you to bring your own analytics tool to Onyx! Copy the Web
-        snippet from your analytics provider into the box below, and we&apos;ll
-        start sending usage events.
+      <Text as="p">
+        {
+          "This allows you to bring your own analytics tool to Onyx! Copy the Web snippet from your analytics provider into the box below, and we'll start sending usage events."
+        }
       </Text>
+      <Spacer rem={2} />
 
       <CustomAnalyticsUpdateForm />
     </div>

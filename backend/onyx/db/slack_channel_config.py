@@ -75,7 +75,7 @@ def create_slack_channel_persona(
         llm_model_version_override=None,
         starter_messages=None,
         is_public=True,
-        featured=False,
+        is_featured=False,
         db_session=db_session,
         commit=False,
     )
@@ -84,7 +84,8 @@ def create_slack_channel_persona(
 
 
 def _no_ee_standard_answer_categories(
-    *args: Any, **kwargs: Any  # noqa: ARG001
+    *args: Any,  # noqa: ARG001
+    **kwargs: Any,  # noqa: ARG001
 ) -> list:
     return []
 

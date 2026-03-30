@@ -13,13 +13,14 @@ import { Button } from "@opal/components";
 import { Hoverable } from "@opal/core";
 import { SvgArrowExchange, SvgSettings, SvgTrash } from "@opal/icons";
 import * as SettingsLayouts from "@/layouts/settings-layouts";
-import { ADMIN_ROUTE_CONFIG, ADMIN_PATHS } from "@/lib/admin-routes";
+import { ADMIN_ROUTES } from "@/lib/admin-routes";
 import * as GeneralLayouts from "@/layouts/general-layouts";
 import {
   getProviderDisplayName,
   getProviderIcon,
   getProviderProductName,
 } from "@/lib/llmConfig/providers";
+import { refreshLlmProviderCaches } from "@/lib/llmConfig/cache";
 import { deleteLlmProvider, setDefaultLlmModel } from "@/lib/llmConfig/svc";
 import Text from "@/refresh-components/texts/Text";
 import { Horizontal as HorizontalInput } from "@/layouts/input-layouts";
@@ -33,24 +34,40 @@ import {
   LLMProviderView,
   WellKnownLLMProviderDescriptor,
 } from "@/interfaces/llm";
-import { LLM_PROVIDERS_ADMIN_URL } from "@/lib/llmConfig/constants";
 import { getModalForExistingProvider } from "@/sections/modals/llmConfig/getModal";
-import { OpenAIModal } from "@/sections/modals/llmConfig/OpenAIModal";
-import { AnthropicModal } from "@/sections/modals/llmConfig/AnthropicModal";
-import { OllamaModal } from "@/sections/modals/llmConfig/OllamaModal";
-import { AzureModal } from "@/sections/modals/llmConfig/AzureModal";
-import { BedrockModal } from "@/sections/modals/llmConfig/BedrockModal";
-import { VertexAIModal } from "@/sections/modals/llmConfig/VertexAIModal";
-import { OpenRouterModal } from "@/sections/modals/llmConfig/OpenRouterModal";
-import { CustomModal } from "@/sections/modals/llmConfig/CustomModal";
-import { LMStudioForm } from "@/sections/modals/llmConfig/LMStudioForm";
+import OpenAIModal from "@/sections/modals/llmConfig/OpenAIModal";
+import AnthropicModal from "@/sections/modals/llmConfig/AnthropicModal";
+import OllamaModal from "@/sections/modals/llmConfig/OllamaModal";
+import AzureModal from "@/sections/modals/llmConfig/AzureModal";
+import BedrockModal from "@/sections/modals/llmConfig/BedrockModal";
+import VertexAIModal from "@/sections/modals/llmConfig/VertexAIModal";
+import OpenRouterModal from "@/sections/modals/llmConfig/OpenRouterModal";
+import CustomModal from "@/sections/modals/llmConfig/CustomModal";
+import LMStudioForm from "@/sections/modals/llmConfig/LMStudioForm";
+import LiteLLMProxyModal from "@/sections/modals/llmConfig/LiteLLMProxyModal";
+import BifrostModal from "@/sections/modals/llmConfig/BifrostModal";
 import { Section } from "@/layouts/general-layouts";
 
-const route = ADMIN_ROUTE_CONFIG[ADMIN_PATHS.LLM_MODELS]!;
+const route = ADMIN_ROUTES.LLM_MODELS;
 
 // ============================================================================
 // Provider form mapping (keyed by provider name from the API)
 // ============================================================================
+
+// Client-side ordering for the "Add Provider" cards. The backend may return
+// wellKnownLLMProviders in an arbitrary order, so we sort explicitly here.
+const PROVIDER_DISPLAY_ORDER: string[] = [
+  "openai",
+  "anthropic",
+  "vertex_ai",
+  "bedrock",
+  "azure",
+  "litellm_proxy",
+  "ollama_chat",
+  "openrouter",
+  "lm_studio",
+  "bifrost",
+];
 
 const PROVIDER_MODAL_MAP: Record<
   string,
@@ -116,6 +133,20 @@ const PROVIDER_MODAL_MAP: Record<
       onOpenChange={onOpenChange}
     />
   ),
+  litellm_proxy: (d, open, onOpenChange) => (
+    <LiteLLMProxyModal
+      shouldMarkAsDefault={d}
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  ),
+  bifrost: (d, open, onOpenChange) => (
+    <BifrostModal
+      shouldMarkAsDefault={d}
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  ),
 };
 
 // ============================================================================
@@ -126,12 +157,14 @@ interface ExistingProviderCardProps {
   provider: LLMProviderView;
   isDefault: boolean;
   isLastProvider: boolean;
+  defaultModelName?: string;
 }
 
 function ExistingProviderCard({
   provider,
   isDefault,
   isLastProvider,
+  defaultModelName,
 }: ExistingProviderCardProps) {
   const { mutate } = useSWRConfig();
   const [isOpen, setIsOpen] = useState(false);
@@ -140,7 +173,7 @@ function ExistingProviderCard({
   const handleDelete = async () => {
     try {
       await deleteLlmProvider(provider.id);
-      mutate(LLM_PROVIDERS_ADMIN_URL);
+      await refreshLlmProviderCaches(mutate);
       deleteModal.toggle(false);
       toast.success("Provider deleted successfully!");
     } catch (e) {
@@ -183,7 +216,7 @@ function ExistingProviderCard({
             icon={getProviderIcon(provider.provider)}
             title={provider.name}
             description={getProviderDisplayName(provider.provider)}
-            sizePreset="main-content"
+            sizePreset="main-ui"
             variant="section"
             tag={isDefault ? { title: "Default", color: "blue" } : undefined}
             rightChildren={
@@ -208,7 +241,12 @@ function ExistingProviderCard({
               </Section>
             }
           />
-          {getModalForExistingProvider(provider, isOpen, setIsOpen)}
+          {getModalForExistingProvider(
+            provider,
+            isOpen,
+            setIsOpen,
+            defaultModelName
+          )}
         </Card>
       </Hoverable.Root>
     </>
@@ -242,7 +280,7 @@ function NewProviderCard({
         icon={getProviderIcon(provider.name)}
         title={getProviderProductName(provider.name)}
         description={getProviderDisplayName(provider.name)}
-        sizePreset="main-content"
+        sizePreset="main-ui"
         variant="section"
         rightChildren={
           <Button
@@ -278,7 +316,7 @@ function NewCustomProviderCard({
         icon={getProviderIcon("custom")}
         title={getProviderProductName("custom")}
         description={getProviderDisplayName("custom")}
-        sizePreset="main-content"
+        sizePreset="main-ui"
         variant="section"
         rightChildren={
           <Button
@@ -345,7 +383,7 @@ export default function LLMConfigurationPage() {
 
     try {
       await setDefaultLlmModel(providerId, modelName);
-      mutate(LLM_PROVIDERS_ADMIN_URL);
+      await refreshLlmProviderCaches(mutate);
       toast.success("Default model updated successfully!");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
@@ -424,6 +462,11 @@ export default function LLMConfigurationPage() {
                     provider={provider}
                     isDefault={defaultText?.provider_id === provider.id}
                     isLastProvider={sortedProviders.length === 1}
+                    defaultModelName={
+                      defaultText?.provider_id === provider.id
+                        ? defaultText.model_name
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -448,23 +491,32 @@ export default function LLMConfigurationPage() {
           />
 
           <div className="grid grid-cols-2 gap-2">
-            {wellKnownLLMProviders?.map((provider) => {
-              const formFn = PROVIDER_MODAL_MAP[provider.name];
-              if (!formFn) {
-                toast.error(
-                  `No modal mapping for provider "${provider.name}".`
+            {[...(wellKnownLLMProviders ?? [])]
+              .sort((a, b) => {
+                const aIndex = PROVIDER_DISPLAY_ORDER.indexOf(a.name);
+                const bIndex = PROVIDER_DISPLAY_ORDER.indexOf(b.name);
+                return (
+                  (aIndex === -1 ? Infinity : aIndex) -
+                  (bIndex === -1 ? Infinity : bIndex)
                 );
-                return null;
-              }
-              return (
-                <NewProviderCard
-                  key={provider.name}
-                  provider={provider}
-                  isFirstProvider={isFirstProvider}
-                  formFn={formFn}
-                />
-              );
-            })}
+              })
+              .map((provider) => {
+                const formFn = PROVIDER_MODAL_MAP[provider.name];
+                if (!formFn) {
+                  toast.error(
+                    `No modal mapping for provider "${provider.name}".`
+                  );
+                  return null;
+                }
+                return (
+                  <NewProviderCard
+                    key={provider.name}
+                    provider={provider}
+                    isFirstProvider={isFirstProvider}
+                    formFn={formFn}
+                  />
+                );
+              })}
             <NewCustomProviderCard isFirstProvider={isFirstProvider} />
           </div>
         </GeneralLayouts.Section>

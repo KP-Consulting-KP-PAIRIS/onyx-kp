@@ -4,8 +4,10 @@ import { CCPairIndexingStatusTable } from "./CCPairIndexingStatusTable";
 import { SearchAndFilterControls } from "./SearchAndFilterControls";
 import * as SettingsLayouts from "@/layouts/settings-layouts";
 import Link from "next/link";
-import { ADMIN_ROUTE_CONFIG, ADMIN_PATHS } from "@/lib/admin-routes";
-import Text from "@/components/ui/text";
+import { ADMIN_ROUTES } from "@/lib/admin-routes";
+import { Text } from "@opal/components";
+import { markdown } from "@opal/utils";
+import Spacer from "@/refresh-components/Spacer";
 import { useConnectorIndexingStatusWithPagination } from "@/lib/hooks";
 import { useToastFromQuery } from "@/hooks/useToast";
 import { Button } from "@opal/components";
@@ -17,6 +19,8 @@ import Cookies from "js-cookie";
 import { TOGGLED_CONNECTORS_COOKIE_NAME } from "@/lib/constants";
 import { ConnectorStaggeredSkeleton } from "./ConnectorRowSkeleton";
 import { IndexingStatusRequest } from "@/lib/types";
+
+const route = ADMIN_ROUTES.INDEXING_STATUS;
 
 function Main() {
   const vectorDbEnabled = useVectorDbEnabled();
@@ -183,13 +187,14 @@ function Main() {
           <ConnectorStaggeredSkeleton rowCount={8} standalone={true} />
         </div>
       ) : !ccPairsIndexingStatuses || ccPairsIndexingStatuses.length === 0 ? (
-        <Text className="mt-12">
-          It looks like you don&apos;t have any connectors setup yet. Visit the{" "}
-          <Link className="text-link" href="/admin/add-connector">
-            Add Connector
-          </Link>{" "}
-          page to get started!
-        </Text>
+        <div>
+          <Spacer rem={3} />
+          <Text as="p">
+            {markdown(
+              "It looks like you don't have any connectors setup yet. Visit the [Add Connector](/admin/add-connector) page to get started!"
+            )}
+          </Text>
+        </div>
       ) : (
         <CCPairIndexingStatusTable
           ccPairsIndexingStatuses={ccPairsIndexingStatuses}
@@ -204,15 +209,9 @@ function Main() {
 }
 
 export default function Status() {
-  const route = ADMIN_ROUTE_CONFIG[ADMIN_PATHS.INDEXING_STATUS]!;
-
   useToastFromQuery({
     "connector-created": {
       message: "Connector created successfully",
-      type: "success",
-    },
-    "connector-deleted": {
-      message: "Connector deleted successfully",
       type: "success",
     },
   });

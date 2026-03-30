@@ -15,6 +15,7 @@ from onyx.chat.citation_processor import DynamicCitationProcessor
 from onyx.chat.emitter import Emitter
 from onyx.chat.models import ChatMessageSimple
 from onyx.chat.models import LlmStepResult
+from onyx.chat.tool_call_args_streaming import maybe_emit_argument_delta
 from onyx.configs.app_configs import LOG_ONYX_MODEL_INTERACTIONS
 from onyx.configs.app_configs import PROMPT_CACHE_CHAT_HISTORY
 from onyx.configs.constants import MessageType
@@ -54,6 +55,7 @@ from onyx.server.query_and_chat.streaming_models import ReasoningStart
 from onyx.tools.models import ToolCallKickoff
 from onyx.tracing.framework.create import generation_span
 from onyx.utils.b64 import get_image_type_from_bytes
+from onyx.utils.jsonriver import Parser
 from onyx.utils.logger import setup_logger
 from onyx.utils.postgres_sanitization import sanitize_string
 from onyx.utils.text_processing import find_all_json_objects
@@ -693,8 +695,7 @@ def _build_structured_assistant_message(msg: ChatMessageSimple) -> AssistantMess
 def _build_structured_tool_response_message(msg: ChatMessageSimple) -> ToolMessage:
     if not msg.tool_call_id:
         raise ValueError(
-            "Tool call response message encountered but tool_call_id is not available. "
-            f"Message: {msg}"
+            f"Tool call response message encountered but tool_call_id is not available. Message: {msg}"
         )
 
     return ToolMessage(
@@ -729,8 +730,7 @@ class _OllamaHistoryMessageFormatter(_HistoryMessageFormatter):
 
         tool_call_lines = [
             (
-                f"[Tool Call] name={tc.tool_name} "
-                f"id={tc.tool_call_id} args={json.dumps(tc.tool_arguments)}"
+                f"[Tool Call] name={tc.tool_name} id={tc.tool_call_id} args={json.dumps(tc.tool_arguments)}"
             )
             for tc in msg.tool_calls
         ]
@@ -748,8 +748,7 @@ class _OllamaHistoryMessageFormatter(_HistoryMessageFormatter):
     def format_tool_response_message(self, msg: ChatMessageSimple) -> UserMessage:
         if not msg.tool_call_id:
             raise ValueError(
-                "Tool call response message encountered but tool_call_id is not available. "
-                f"Message: {msg}"
+                f"Tool call response message encountered but tool_call_id is not available. Message: {msg}"
             )
 
         return UserMessage(
@@ -837,8 +836,7 @@ def translate_history_to_llm_format(
                             content_parts.append(image_part)
                         except Exception as e:
                             logger.warning(
-                                f"Failed to process image file {img_file.file_id}: {e}. "
-                                "Skipping image."
+                                f"Failed to process image file {img_file.file_id}: {e}. Skipping image."
                             )
                 user_msg = UserMessage(
                     role="user",
@@ -1009,11 +1007,16 @@ def run_llm_step_pkt_generator(
         )
 
     id_to_tool_call_map: dict[int, dict[str, Any]] = {}
+    arg_parsers: dict[int, Parser] = {}
     reasoning_start = False
     answer_start = False
     accumulated_reasoning = ""
     accumulated_answer = ""
     accumulated_raw_answer = ""
+    stream_chunk_count = 0
+    actionable_chunk_count = 0
+    empty_chunk_count = 0
+    finish_reasons: set[str] = set()
     xml_tool_call_content_filter = _XmlToolCallContentFilter()
 
     processor_state: Any = None
@@ -1146,6 +1149,7 @@ def run_llm_step_pkt_generator(
             user_identity=user_identity,
             timeout_override=timeout_override,
         ):
+            stream_chunk_count += 1
             if packet.usage:
                 usage = packet.usage
                 span_generation.span_data.usage = {
@@ -1155,16 +1159,21 @@ def run_llm_step_pkt_generator(
                     "cache_creation_input_tokens": usage.cache_creation_input_tokens,
                 }
                 # Note: LLM cost tracking is now handled in multi_llm.py
+            finish_reason = packet.choice.finish_reason
+            if finish_reason:
+                finish_reasons.add(str(finish_reason))
             delta = packet.choice.delta
 
             # Weird behavior from some model providers, just log and ignore for now
             if (
-                delta.content is None
+                not delta.content
                 and delta.reasoning_content is None
-                and delta.tool_calls is None
+                and not delta.tool_calls
             ):
+                empty_chunk_count += 1
                 logger.warning(
-                    f"LLM packet is empty (no contents, reasoning or tool calls). Skipping: {packet}"
+                    "LLM packet is empty (no content, reasoning, or tool calls). "
+                    f"finish_reason={finish_reason}. Skipping: {packet}"
                 )
                 continue
 
@@ -1173,6 +1182,8 @@ def run_llm_step_pkt_generator(
                     time.monotonic() - stream_start_time
                 )
                 first_action_recorded = True
+            if _delta_has_action(delta):
+                actionable_chunk_count += 1
 
             if custom_token_processor:
                 # The custom token processor can modify the deltas for specific custom logic
@@ -1215,7 +1226,14 @@ def run_llm_step_pkt_generator(
                 yield from _close_reasoning_if_active()
 
                 for tool_call_delta in delta.tool_calls:
+                    # maybe_emit depends and update being called first and attaching the delta
                     _update_tool_call_with_delta(id_to_tool_call_map, tool_call_delta)
+                    yield from maybe_emit_argument_delta(
+                        tool_calls_in_progress=id_to_tool_call_map,
+                        tool_call_delta=tool_call_delta,
+                        placement=_current_placement(),
+                        parsers=arg_parsers,
+                    )
 
         # Flush any tail text buffered while checking for split "<function_calls" markers.
         filtered_content_tail = xml_tool_call_content_filter.flush()
@@ -1300,6 +1318,15 @@ def run_llm_step_pkt_generator(
             logger.debug(f"Tool calls:\n{tool_calls_str}")
         else:
             logger.debug("Tool calls: []")
+
+    if actionable_chunk_count == 0:
+        logger.warning(
+            "LLM stream completed with no actionable deltas. "
+            f"chunks={stream_chunk_count}, empty_chunks={empty_chunk_count}, "
+            f"finish_reasons={sorted(finish_reasons)}, "
+            f"provider={llm.config.model_provider}, model={llm.config.model_name}, "
+            f"tool_choice={tool_choice}, tools_sent={len(tool_definitions)}"
+        )
 
     return (
         LlmStepResult(

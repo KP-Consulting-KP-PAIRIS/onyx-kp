@@ -1,8 +1,9 @@
 "use client";
 
 import * as SettingsLayouts from "@/layouts/settings-layouts";
-import { ADMIN_ROUTE_CONFIG, ADMIN_PATHS } from "@/lib/admin-routes";
+import { ADMIN_ROUTES } from "@/lib/admin-routes";
 import { Button } from "@opal/components";
+import { Disabled } from "@opal/core";
 import {
   AppearanceThemeSettings,
   AppearanceThemeSettingsRef,
@@ -13,9 +14,9 @@ import { toast } from "@/hooks/useToast";
 import { Formik, Form } from "formik";
 import * as Yup from "yup";
 import { EnterpriseSettings } from "@/interfaces/settings";
-import { useRouter } from "next/navigation";
+import { mutate } from "swr";
 
-const route = ADMIN_ROUTE_CONFIG[ADMIN_PATHS.THEME]!;
+const route = ADMIN_ROUTES.THEME;
 
 const CHAR_LIMITS = {
   application_name: 50,
@@ -28,9 +29,9 @@ const CHAR_LIMITS = {
 };
 
 export default function ThemePage() {
-  const router = useRouter();
   const settings = useContext(SettingsContext);
   const [selectedLogo, setSelectedLogo] = useState<File | null>(null);
+  const [logoVersion, setLogoVersion] = useState(0);
   const appearanceSettingsRef = useRef<AppearanceThemeSettingsRef>(null);
 
   if (!settings) {
@@ -53,7 +54,7 @@ export default function ThemePage() {
       }),
     });
     if (response.ok) {
-      router.refresh();
+      await mutate("/api/enterprise-settings");
       return true;
     } else {
       const errorMsg = (await response.json()).detail;
@@ -149,6 +150,8 @@ export default function ThemePage() {
       validationSchema={validationSchema}
       validateOnChange={false}
       onSubmit={async (values, formikHelpers) => {
+        let logoUploaded = false;
+
         // Handle logo upload if a new logo was selected
         if (selectedLogo) {
           const formData = new FormData();
@@ -165,6 +168,7 @@ export default function ThemePage() {
           }
           // Only clear the selected logo after a successful upload
           setSelectedLogo(null);
+          logoUploaded = true;
           values.use_custom_logo = true;
         }
 
@@ -192,6 +196,9 @@ export default function ThemePage() {
         // dirty comparisons reflect the newly-saved values.
         if (success) {
           formikHelpers.resetForm({ values });
+          if (logoUploaded) {
+            setLogoVersion((v) => v + 1);
+          }
           toast.success("Appearance settings saved successfully!");
         }
 
@@ -217,21 +224,26 @@ export default function ThemePage() {
                 description="Customize how the application appears to users across your organization."
                 icon={route.icon}
                 rightChildren={
-                  <Button
-                    type="button"
+                  <Disabled
                     disabled={isSubmitting || (!dirty && !hasLogoChange)}
-                    onClick={async () => {
-                      const errors = await validateForm();
-                      if (Object.keys(errors).length > 0) {
-                        setErrors(errors);
-                        appearanceSettingsRef.current?.focusFirstError(errors);
-                        return;
-                      }
-                      await submitForm();
-                    }}
                   >
-                    {isSubmitting ? "Applying..." : "Apply Changes"}
-                  </Button>
+                    <Button
+                      type="button"
+                      onClick={async () => {
+                        const errors = await validateForm();
+                        if (Object.keys(errors).length > 0) {
+                          setErrors(errors);
+                          appearanceSettingsRef.current?.focusFirstError(
+                            errors
+                          );
+                          return;
+                        }
+                        await submitForm();
+                      }}
+                    >
+                      {isSubmitting ? "Applying..." : "Apply Changes"}
+                    </Button>
+                  </Disabled>
                 }
               />
               <SettingsLayouts.Body>
@@ -239,6 +251,7 @@ export default function ThemePage() {
                   ref={appearanceSettingsRef}
                   selectedLogo={selectedLogo}
                   setSelectedLogo={setSelectedLogo}
+                  logoVersion={logoVersion}
                   charLimits={CHAR_LIMITS}
                 />
               </SettingsLayouts.Body>

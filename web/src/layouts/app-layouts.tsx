@@ -20,10 +20,15 @@
 
 "use client";
 
-import { cn, ensureHrefProtocol, noProp } from "@/lib/utils";
+import {
+  cn,
+  ensureHrefProtocol,
+  INTERACTIVE_SELECTOR,
+  noProp,
+} from "@/lib/utils";
 import type { Components } from "react-markdown";
 import Text from "@/refresh-components/texts/Text";
-import { useCallback, useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { useAppBackground } from "@/providers/AppBackgroundProvider";
 import { useTheme } from "next-themes";
 import ShareChatSessionModal from "@/sections/modals/ShareChatSessionModal";
@@ -60,11 +65,12 @@ import {
 } from "@opal/icons";
 import MinimalMarkdown from "@/components/chat/MinimalMarkdown";
 import { useSettingsContext } from "@/providers/SettingsProvider";
-import { AppMode, useAppMode } from "@/providers/AppModeProvider";
+import type { AppMode } from "@/providers/QueryControllerProvider";
 import useAppFocus from "@/hooks/useAppFocus";
 import { useQueryController } from "@/providers/QueryControllerProvider";
 import { usePaidEnterpriseFeaturesEnabled } from "@/components/settings/usePaidEnterpriseFeaturesEnabled";
 import useBrowserInfo from "@/hooks/useBrowserInfo";
+import { APP_SLOGAN } from "@/lib/constants";
 
 /**
  * App Header Component
@@ -82,7 +88,7 @@ import useBrowserInfo from "@/hooks/useBrowserInfo";
  */
 function Header() {
   const isPaidEnterpriseFeaturesEnabled = usePaidEnterpriseFeaturesEnabled();
-  const { appMode, setAppMode } = useAppMode();
+  const { state, setAppMode } = useQueryController();
   const settings = useSettingsContext();
   const { isMobile } = useScreenSize();
   const { setFolded } = useAppSidebarContext();
@@ -108,7 +114,6 @@ function Header() {
     useChatSessions();
   const router = useRouter();
   const appFocus = useAppFocus();
-  const { classification } = useQueryController();
 
   const customHeaderContent =
     settings?.enterpriseSettings?.custom_header_content;
@@ -117,7 +122,8 @@ function Header() {
   // without this content still use.
   const pageWithHeaderContent = appFocus.isChat() || appFocus.isNewSession();
 
-  const effectiveMode: AppMode = appFocus.isNewSession() ? appMode : "chat";
+  const effectiveMode: AppMode =
+    appFocus.isNewSession() && state.phase === "idle" ? state.appMode : "chat";
 
   const availableProjects = useMemo(() => {
     if (!projects) return [];
@@ -323,7 +329,7 @@ function Header() {
           {isPaidEnterpriseFeaturesEnabled &&
             settings.isSearchModeAvailable &&
             appFocus.isNewSession() &&
-            !classification && (
+            state.phase === "idle" && (
               <Popover open={modePopoverOpen} onOpenChange={setModePopoverOpen}>
                 <Popover.Trigger asChild>
                   <OpenButton
@@ -394,7 +400,7 @@ function Header() {
               <Button
                 icon={SvgShare}
                 prominence="tertiary"
-                transient={showShareModal}
+                interaction={showShareModal ? "hover" : "rest"}
                 responsiveHideText
                 onClick={() => setShowShareModal(true)}
                 aria-label="share-chat-button"
@@ -461,7 +467,7 @@ function Footer() {
     settings?.enterpriseSettings?.custom_lower_disclaimer_content ||
     `[Onyx ${
       settings?.webVersion || "dev"
-    }](https://www.onyx.app/) - Open Source AI Platform`;
+    }](https://www.onyx.app/) - ${APP_SLOGAN}`;
 
   return (
     <footer
@@ -531,6 +537,37 @@ function Root({ children, enableBackground }: AppRootProps) {
   const { isSafari } = useBrowserInfo();
   const isLightMode = resolvedTheme === "light";
   const showBackground = hasBackground && enableBackground;
+
+  // Track whether the chat input was focused before a mousedown, so we can
+  // restore focus on mouseup if no text was selected. This preserves
+  // click-drag text selection while keeping the input focused on plain clicks.
+  const inputWasFocused = useRef(false);
+
+  const handleMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const activeEl = document.activeElement;
+      const isFocused =
+        activeEl instanceof HTMLElement &&
+        activeEl.id === "onyx-chat-input-textarea";
+      const target = event.target;
+      const isInteractive =
+        target instanceof HTMLElement && !!target.closest(INTERACTIVE_SELECTOR);
+      inputWasFocused.current = isFocused && !isInteractive;
+    },
+    []
+  );
+
+  const handleMouseUp = useCallback(() => {
+    if (!inputWasFocused.current) return;
+    inputWasFocused.current = false;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const textarea = document.getElementById("onyx-chat-input-textarea");
+    // Only restore focus if no other element has grabbed it since mousedown.
+    if (textarea && document.activeElement !== textarea) {
+      textarea.focus();
+    }
+  }, []);
   const horizontalBlurMask = `linear-gradient(
     to right,
     transparent 0%,
@@ -548,6 +585,8 @@ function Root({ children, enableBackground }: AppRootProps) {
     */
     <div
       data-main-container
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
       className={cn(
         "@container flex flex-col h-full w-full relative overflow-hidden",
         showBackground && "bg-cover bg-center bg-fixed"

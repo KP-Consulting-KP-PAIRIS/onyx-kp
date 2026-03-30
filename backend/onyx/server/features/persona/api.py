@@ -91,24 +91,21 @@ def _validate_vector_db_knowledge(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Cannot attach document sets to an assistant when "
-                "the vector database is disabled (DISABLE_VECTOR_DB is set)."
+                "Cannot attach document sets to an assistant when the vector database is disabled (DISABLE_VECTOR_DB is set)."
             ),
         )
     if persona_upsert_request.hierarchy_node_ids:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Cannot attach hierarchy nodes to an assistant when "
-                "the vector database is disabled (DISABLE_VECTOR_DB is set)."
+                "Cannot attach hierarchy nodes to an assistant when the vector database is disabled (DISABLE_VECTOR_DB is set)."
             ),
         )
     if persona_upsert_request.document_ids:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Cannot attach documents to an assistant when "
-                "the vector database is disabled (DISABLE_VECTOR_DB is set)."
+                "Cannot attach documents to an assistant when the vector database is disabled (DISABLE_VECTOR_DB is set)."
             ),
         )
 
@@ -122,8 +119,8 @@ admin_agents_router = APIRouter(prefix=ADMIN_AGENTS_RESOURCE)
 agents_router = APIRouter(prefix=AGENTS_RESOURCE)
 
 
-class IsVisibleRequest(BaseModel):
-    is_visible: bool
+class IsListedRequest(BaseModel):
+    is_listed: bool
 
 
 class IsPublicRequest(BaseModel):
@@ -131,19 +128,19 @@ class IsPublicRequest(BaseModel):
 
 
 class IsFeaturedRequest(BaseModel):
-    featured: bool
+    is_featured: bool
 
 
-@admin_router.patch("/{persona_id}/visible")
+@admin_router.patch("/{persona_id}/listed")
 def patch_persona_visibility(
     persona_id: int,
-    is_visible_request: IsVisibleRequest,
+    is_listed_request: IsListedRequest,
     user: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
     update_persona_visibility(
         persona_id=persona_id,
-        is_visible=is_visible_request.is_visible,
+        is_listed=is_listed_request.is_listed,
         db_session=db_session,
         user=user,
     )
@@ -178,7 +175,7 @@ def patch_persona_featured_status(
     try:
         update_persona_featured(
             persona_id=persona_id,
-            featured=is_featured_request.featured,
+            is_featured=is_featured_request.is_featured,
             db_session=db_session,
             user=user,
         )
@@ -317,7 +314,7 @@ def create_persona(
     )
     mt_cloud_telemetry(
         tenant_id=tenant_id,
-        distinct_id=user.email,
+        distinct_id=str(user.id),
         event=MilestoneRecordType.CREATED_ASSISTANT,
     )
 

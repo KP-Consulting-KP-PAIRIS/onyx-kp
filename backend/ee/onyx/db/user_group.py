@@ -424,8 +424,7 @@ def fetch_user_groups_for_documents(
 def _check_user_group_is_modifiable(user_group: UserGroup) -> None:
     if not user_group.is_up_to_date:
         raise ValueError(
-            "Specified user group is currently syncing. Wait until the current "
-            "sync has finished before editing."
+            "Specified user group is currently syncing. Wait until the current sync has finished before editing."
         )
 
 
@@ -796,6 +795,33 @@ def update_user_group(
 
     # update "time_updated" to now
     db_user_group.time_last_modified_by_user = func.now()
+
+    db_session.commit()
+    return db_user_group
+
+
+def rename_user_group(
+    db_session: Session,
+    user_group_id: int,
+    new_name: str,
+) -> UserGroup:
+    stmt = select(UserGroup).where(UserGroup.id == user_group_id)
+    db_user_group = db_session.scalar(stmt)
+    if db_user_group is None:
+        raise ValueError(f"UserGroup with id '{user_group_id}' not found")
+
+    _check_user_group_is_modifiable(db_user_group)
+
+    db_user_group.name = new_name
+    db_user_group.time_last_modified_by_user = func.now()
+
+    # CC pair documents in Vespa contain the group name, so we need to
+    # trigger a sync to update them with the new name.
+    _mark_user_group__cc_pair_relationships_outdated__no_commit(
+        db_session=db_session, user_group_id=user_group_id
+    )
+    if not DISABLE_VECTOR_DB:
+        db_user_group.is_up_to_date = False
 
     db_session.commit()
     return db_user_group

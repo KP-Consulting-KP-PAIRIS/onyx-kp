@@ -1,5 +1,6 @@
 "use client";
 
+import { markdown } from "@opal/utils";
 import Link from "next/link";
 import Modal from "@/refresh-components/Modal";
 import Text from "@/refresh-components/texts/Text";
@@ -10,6 +11,7 @@ import Separator from "@/refresh-components/Separator";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CopyIconButton from "@/refresh-components/buttons/CopyIconButton";
 import { Button } from "@opal/components";
+import { Disabled } from "@opal/core";
 import { MethodSpec, ToolSnapshot } from "@/lib/tools/interfaces";
 import {
   validateToolDefinition,
@@ -237,28 +239,9 @@ function FormContent({
         <InputLayouts.Vertical
           name="definition"
           title="OpenAPI Schema Definition"
-          subDescription={
-            <>
-              Specify an OpenAPI schema that defines the APIs you want to make
-              available as part of this action. Learn more about{" "}
-              <span className="inline-flex">
-                <SimpleTooltip
-                  tooltip={`Open ${DOCS_ADMINS_PATH}/actions/openapi`}
-                  side="top"
-                >
-                  <Link
-                    href={`${DOCS_ADMINS_PATH}/actions/openapi`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline"
-                  >
-                    OpenAPI actions
-                  </Link>
-                </SimpleTooltip>
-              </span>
-              .
-            </>
-          }
+          subDescription={markdown(
+            `Specify an OpenAPI schema that defines the APIs you want to make available as part of this action. Learn more about [OpenAPI actions](${DOCS_ADMINS_PATH}/actions/openapi).`
+          )}
         >
           <div className="group/DefinitionTextAreaField relative w-full">
             {values.definition.trim() && (
@@ -374,31 +357,29 @@ function FormContent({
                   onDisconnectTool(existingTool);
                 }}
               />
-              <Button
-                prominence="secondary"
-                type="button"
-                onClick={handleEditAuthenticationClick}
-                disabled={!onEditAuthentication}
-              >
-                Edit Configs
-              </Button>
+              <Disabled disabled={!onEditAuthentication}>
+                <Button
+                  prominence="secondary"
+                  type="button"
+                  onClick={handleEditAuthenticationClick}
+                >
+                  Edit Configs
+                </Button>
+              </Disabled>
             </Section>
           </Section>
         )}
       </Modal.Body>
 
       <Modal.Footer>
-        <Button
-          prominence="secondary"
-          type="button"
-          onClick={handleClose}
-          disabled={isSubmitting}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" disabled={isSubmitting || !dirty}>
-          {primaryButtonLabel}
-        </Button>
+        <Disabled disabled={isSubmitting}>
+          <Button prominence="secondary" type="button" onClick={handleClose}>
+            Cancel
+          </Button>
+        </Disabled>
+        <Disabled disabled={isSubmitting || !dirty}>
+          <Button type="submit">{primaryButtonLabel}</Button>
+        </Disabled>
       </Modal.Footer>
     </Form>
   );

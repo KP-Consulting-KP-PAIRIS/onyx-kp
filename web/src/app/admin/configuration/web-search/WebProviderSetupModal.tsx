@@ -7,6 +7,7 @@ import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import PasswordInputTypeIn from "@/refresh-components/inputs/PasswordInputTypeIn";
 import Modal from "@/refresh-components/Modal";
 import { Button } from "@opal/components";
+import { Disabled } from "@opal/core";
 
 import { SvgArrowExchange, SvgOnyxLogo } from "@opal/icons";
 import type { IconProps } from "@opal/types";
@@ -68,7 +69,7 @@ export const WebProviderSetupModal = memo(
             <SvgArrowExchange className="size-3 text-text-04" />
           </div>
           <div className="flex items-center justify-center size-7 p-0.5 shrink-0 overflow-clip">
-            <SvgOnyxLogo size={24} className="text-text-04 shrink-0" />
+            <SvgOnyxLogo size={24} className="shrink-0" />
           </div>
         </div>
       );
@@ -247,13 +248,11 @@ export const WebProviderSetupModal = memo(
             <Button prominence="secondary" type="button" onClick={onClose}>
               Cancel
             </Button>
-            <Button
-              type="button"
-              disabled={!canConnect || isProcessing}
-              onClick={onConnect}
-            >
-              {isProcessing ? "Connecting..." : "Connect"}
-            </Button>
+            <Disabled disabled={!canConnect || isProcessing}>
+              <Button type="button" onClick={onConnect}>
+                {isProcessing ? "Connecting..." : "Connect"}
+              </Button>
+            </Disabled>
           </Modal.Footer>
         </Modal.Content>
       </Modal>

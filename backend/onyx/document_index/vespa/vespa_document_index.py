@@ -1,6 +1,8 @@
 import concurrent.futures
 import logging
 import random
+from collections.abc import Generator
+from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
@@ -8,6 +10,7 @@ import httpx
 from pydantic import BaseModel
 from retry import retry
 
+from onyx.configs.app_configs import MAX_CHUNKS_PER_DOC_BATCH
 from onyx.configs.app_configs import RECENCY_BIAS_MULTIPLIER
 from onyx.configs.app_configs import RERANK_COUNT
 from onyx.configs.chat_configs import DOC_TIME_DECAY
@@ -251,10 +254,7 @@ def _update_single_chunk(
         fields=vespa_put_fields,
     )
 
-    vespa_url = (
-        f"{DOCUMENT_ID_ENDPOINT.format(index_name=index_name)}/{doc_chunk_id}"
-        "?create=true"
-    )
+    vespa_url = f"{DOCUMENT_ID_ENDPOINT.format(index_name=index_name)}/{doc_chunk_id}?create=true"
 
     try:
         resp = http_client.put(
@@ -321,7 +321,7 @@ class VespaDocumentIndex(DocumentIndex):
 
     def index(
         self,
-        chunks: list[DocMetadataAwareIndexChunk],
+        chunks: Iterable[DocMetadataAwareIndexChunk],
         indexing_metadata: IndexingMetadata,
     ) -> list[DocumentInsertionRecord]:
         doc_id_to_chunk_cnt_diff = indexing_metadata.doc_id_to_chunk_cnt_diff
@@ -341,22 +341,31 @@ class VespaDocumentIndex(DocumentIndex):
 
         # Vespa has restrictions on valid characters, yet document IDs come from
         # external w.r.t. this class. We need to sanitize them.
-        cleaned_chunks: list[DocMetadataAwareIndexChunk] = [
-            clean_chunk_id_copy(chunk) for chunk in chunks
-        ]
-        assert len(cleaned_chunks) == len(
-            chunks
-        ), "Bug: Cleaned chunks and input chunks have different lengths."
+        #
+        # Instead of materializing all cleaned chunks upfront, we stream them
+        # through a generator that cleans IDs and builds the original-ID mapping
+        # incrementally as chunks flow into Vespa.
+        def _clean_and_track(
+            chunks_iter: Iterable[DocMetadataAwareIndexChunk],
+            id_map: dict[str, str],
+            seen_ids: set[str],
+        ) -> Generator[DocMetadataAwareIndexChunk, None, None]:
+            """Cleans chunk IDs and builds the original-ID mapping
+            incrementally as chunks flow through, avoiding a separate
+            materialization pass."""
+            for chunk in chunks_iter:
+                original_id = chunk.source_document.id
+                cleaned = clean_chunk_id_copy(chunk)
+                cleaned_id = cleaned.source_document.id
+                # Needed so the final DocumentInsertionRecord returned can have
+                # the original document ID. cleaned_chunks might not contain IDs
+                # exactly as callers supplied them.
+                id_map[cleaned_id] = original_id
+                seen_ids.add(cleaned_id)
+                yield cleaned
 
-        # Needed so the final DocumentInsertionRecord returned can have the
-        # original document ID. cleaned_chunks might not contain IDs exactly as
-        # callers supplied them.
-        new_document_id_to_original_document_id: dict[str, str] = dict()
-        for i, cleaned_chunk in enumerate(cleaned_chunks):
-            old_chunk = chunks[i]
-            new_document_id_to_original_document_id[
-                cleaned_chunk.source_document.id
-            ] = old_chunk.source_document.id
+        new_document_id_to_original_document_id: dict[str, str] = {}
+        all_cleaned_doc_ids: set[str] = set()
 
         existing_docs: set[str] = set()
 
@@ -412,8 +421,16 @@ class VespaDocumentIndex(DocumentIndex):
                     executor=executor,
                 )
 
-            # Insert new Vespa documents.
-            for chunk_batch in batch_generator(cleaned_chunks, BATCH_SIZE):
+            # Insert new Vespa documents, streaming through the cleaning
+            # pipeline so chunks are never fully materialized.
+            cleaned_chunks = _clean_and_track(
+                chunks,
+                new_document_id_to_original_document_id,
+                all_cleaned_doc_ids,
+            )
+            for chunk_batch in batch_generator(
+                cleaned_chunks, min(BATCH_SIZE, MAX_CHUNKS_PER_DOC_BATCH)
+            ):
                 batch_index_vespa_chunks(
                     chunks=chunk_batch,
                     index_name=self._index_name,
@@ -421,10 +438,6 @@ class VespaDocumentIndex(DocumentIndex):
                     multitenant=self._multitenant,
                     executor=executor,
                 )
-
-        all_cleaned_doc_ids: set[str] = {
-            chunk.source_document.id for chunk in cleaned_chunks
-        }
 
         return [
             DocumentInsertionRecord(
@@ -613,6 +626,22 @@ class VespaDocumentIndex(DocumentIndex):
 
         return cleanup_content_for_chunks(query_vespa(params))
 
+    def keyword_retrieval(
+        self,
+        query: str,
+        filters: IndexFilters,
+        num_to_retrieve: int,
+    ) -> list[InferenceChunk]:
+        raise NotImplementedError
+
+    def semantic_retrieval(
+        self,
+        query_embedding: Embedding,
+        filters: IndexFilters,
+        num_to_retrieve: int,
+    ) -> list[InferenceChunk]:
+        raise NotImplementedError
+
     def random_retrieval(
         self,
         filters: IndexFilters,
@@ -726,11 +755,7 @@ class VespaDocumentIndex(DocumentIndex):
         where_clause = (
             f'tenant_id contains "{self._tenant_id}"' if self._multitenant else "true"
         )
-        yql = (
-            f"select documentid from {self._index_name} "
-            f"where {where_clause} "
-            f"limit 0"
-        )
+        yql = f"select documentid from {self._index_name} where {where_clause} limit 0"
         params: dict[str, str | int] = {
             "yql": yql,
             "ranking.profile": "unranked",

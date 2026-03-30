@@ -10,7 +10,9 @@ import {
   TableBody,
   TableCell,
 } from "@/components/ui/table";
-import Text from "@/components/ui/text";
+import { Text } from "@opal/components";
+import { markdown } from "@opal/utils";
+import Spacer from "@/refresh-components/Spacer";
 import Title from "@/components/ui/title";
 import Separator from "@/refresh-components/Separator";
 import { DocumentSetSummary } from "@/lib/types";
@@ -20,7 +22,7 @@ import { ConnectorTitle } from "@/components/admin/connectors/ConnectorTitle";
 import { deleteDocumentSet } from "./lib";
 import { toast } from "@/hooks/useToast";
 import * as SettingsLayouts from "@/layouts/settings-layouts";
-import { ADMIN_ROUTE_CONFIG, ADMIN_PATHS } from "@/lib/admin-routes";
+import { ADMIN_ROUTES } from "@/lib/admin-routes";
 import {
   FiAlertTriangle,
   FiCheckCircle,
@@ -43,6 +45,7 @@ import CreateButton from "@/refresh-components/buttons/CreateButton";
 import { SourceIcon } from "@/components/SourceIcon";
 import Link from "next/link";
 
+const route = ADMIN_ROUTES.DOCUMENT_SETS;
 const numToDisplay = 50;
 
 // Component to display federated connectors with consistent styling
@@ -392,11 +395,12 @@ function Main() {
 
   return (
     <div className="mb-8">
-      <Text className="mb-3">
-        <b>Document Sets</b> allow you to group logically connected documents
-        into a single bundle. These can then be used as a filter when performing
-        searches to control the scope of information Onyx searches over.
+      <Text as="p">
+        {markdown(
+          "**Document Sets** allow you to group logically connected documents into a single bundle. These can then be used as a filter when performing searches to control the scope of information Onyx searches over."
+        )}
       </Text>
+      <Spacer rem={0.75} />
 
       <div className="mb-3"></div>
 
@@ -422,8 +426,6 @@ function Main() {
 }
 
 export default function Page() {
-  const route = ADMIN_ROUTE_CONFIG[ADMIN_PATHS.DOCUMENT_SETS]!;
-
   return (
     <SettingsLayouts.Root>
       <SettingsLayouts.Header icon={route.icon} title={route.title} separator />

@@ -61,8 +61,7 @@ def _graph_api_get(
             ):
                 wait = min(int(resp.headers.get("Retry-After", str(2**attempt))), 60)
                 logger.warning(
-                    f"Graph API {resp.status_code} on attempt {attempt + 1}, "
-                    f"retrying in {wait}s: {url}"
+                    f"Graph API {resp.status_code} on attempt {attempt + 1}, retrying in {wait}s: {url}"
                 )
                 time.sleep(wait)
                 continue
@@ -72,8 +71,7 @@ def _graph_api_get(
             if attempt < GRAPH_API_MAX_RETRIES:
                 wait = min(2**attempt, 60)
                 logger.warning(
-                    f"Graph API connection error on attempt {attempt + 1}, "
-                    f"retrying in {wait}s: {url}"
+                    f"Graph API connection error on attempt {attempt + 1}, retrying in {wait}s: {url}"
                 )
                 time.sleep(wait)
                 continue
@@ -252,20 +250,24 @@ def _get_sharepoint_list_item_id(drive_item: DriveItem) -> str | None:
         raise e
 
 
-def _is_public_item(drive_item: DriveItem) -> bool:
-    is_public = False
+def _is_public_item(
+    drive_item: DriveItem,
+    treat_sharing_link_as_public: bool = False,
+) -> bool:
+    if not treat_sharing_link_as_public:
+        return False
+
     try:
         permissions = sleep_and_retry(
             drive_item.permissions.get_all(page_loaded=lambda _: None), "is_public_item"
         )
         for permission in permissions:
-            if permission.link and (
-                permission.link.scope == "anonymous"
-                or permission.link.scope == "organization"
+            if permission.link and permission.link.scope in (
+                "anonymous",
+                "organization",
             ):
-                is_public = True
-                break
-        return is_public
+                return True
+        return False
     except Exception as e:
         logger.error(f"Failed to check if item {drive_item.id} is public: {e}")
         return False
@@ -506,6 +508,7 @@ def get_external_access_from_sharepoint(
     drive_item: DriveItem | None,
     site_page: dict[str, Any] | None,
     add_prefix: bool = False,
+    treat_sharing_link_as_public: bool = False,
 ) -> ExternalAccess:
     """
     Get external access information from SharePoint.
@@ -565,8 +568,7 @@ def get_external_access_from_sharepoint(
                     )
 
     if drive_item and drive_name:
-        # Here we check if the item have have any public links, if so we return early
-        is_public = _is_public_item(drive_item)
+        is_public = _is_public_item(drive_item, treat_sharing_link_as_public)
         if is_public:
             logger.info(f"Item {drive_item.id} is public")
             return ExternalAccess(
@@ -767,8 +769,7 @@ def get_sharepoint_external_groups(
 
     if not enumerate_all_ad_groups or get_access_token is None:
         logger.info(
-            "Skipping exhaustive Azure AD group enumeration. "
-            "Only groups found in site role assignments are included."
+            "Skipping exhaustive Azure AD group enumeration. Only groups found in site role assignments are included."
         )
         return external_user_groups
 

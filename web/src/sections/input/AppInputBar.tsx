@@ -19,10 +19,10 @@ import useCCPairs from "@/hooks/useCCPairs";
 import { MinimalOnyxDocument } from "@/lib/search/interfaces";
 import { ChatState } from "@/app/app/interfaces";
 import { useForcedTools } from "@/lib/hooks/useForcedTools";
-import { useAppMode } from "@/providers/AppModeProvider";
 import useAppFocus from "@/hooks/useAppFocus";
+import { getPastedFilesIfNoText } from "@/lib/clipboard";
 import { cn, isImageFile } from "@/lib/utils";
-import { Disabled } from "@/refresh-components/Disabled";
+import { Disabled } from "@opal/core";
 import { useUser } from "@/providers/UserProvider";
 import {
   SettingsContext,
@@ -44,18 +44,23 @@ import {
   SvgArrowUp,
   SvgGlobe,
   SvgHourglass,
+  SvgMicrophone,
   SvgPlus,
   SvgPlusCircle,
   SvgSearch,
   SvgStop,
   SvgX,
 } from "@opal/icons";
-import { Button } from "@opal/components";
+import { Button, SelectButton } from "@opal/components";
 import Popover from "@/refresh-components/Popover";
 import SimpleLoader from "@/refresh-components/loaders/SimpleLoader";
 import { useQueryController } from "@/providers/QueryControllerProvider";
 import { Section } from "@/layouts/general-layouts";
 import Spacer from "@/refresh-components/Spacer";
+import MicrophoneButton from "@/sections/input/MicrophoneButton";
+import Waveform from "@/components/voice/Waveform";
+import { useVoiceMode } from "@/providers/VoiceModeProvider";
+import { useVoiceStatus } from "@/hooks/useVoiceStatus";
 
 const MIN_INPUT_HEIGHT = 44;
 const MAX_INPUT_HEIGHT = 200;
@@ -114,13 +119,72 @@ const AppInputBar = React.memo(
   }: AppInputBarProps) => {
     // Internal message state - kept local to avoid parent re-renders on every keystroke
     const [message, setMessage] = useState(initialMessage);
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingCycleCount, setRecordingCycleCount] = useState(0);
+    const [isMuted, setIsMuted] = useState(false);
+    const [audioLevel, setAudioLevel] = useState(0);
+    const stopRecordingRef = useRef<(() => Promise<string | null>) | null>(
+      null
+    );
+    const setMutedRef = useRef<((muted: boolean) => void) | null>(null);
     const textAreaRef = useRef<HTMLTextAreaElement>(null);
     const textAreaWrapperRef = useRef<HTMLDivElement>(null);
     const filesWrapperRef = useRef<HTMLDivElement>(null);
     const filesContentRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const { user } = useUser();
-    const { isClassifying, classification } = useQueryController();
+    const { user, isAdmin } = useUser();
+    const { state } = useQueryController();
+    const isClassifying = state.phase === "classifying";
+    const isSearchActive =
+      state.phase === "searching" || state.phase === "search-results";
+    const {
+      stopTTS,
+      isTTSPlaying,
+      isManualTTSPlaying,
+      isTTSLoading,
+      isAwaitingAutoPlaybackStart,
+      isTTSMuted,
+      toggleTTSMute,
+    } = useVoiceMode();
+    const { sttEnabled } = useVoiceStatus();
+    // Show mic button: always if STT configured, or greyed-out for admins to prompt setup
+    const showMicButton = sttEnabled || isAdmin;
+    const isVoicePlaybackActive =
+      isTTSPlaying || isTTSLoading || isAwaitingAutoPlaybackStart;
+    const isVoicePlaybackControllable = isVoicePlaybackActive && !isRecording;
+    const isTTSActuallySpeaking = isTTSPlaying || isManualTTSPlaying;
+    const appFocus = useAppFocus();
+    const isNewSession = appFocus.isNewSession();
+    const appMode = state.phase === "idle" ? state.appMode : undefined;
+    const isSearchMode =
+      (isNewSession && appMode === "search") || isSearchActive;
+
+    const handleRecordingChange = useCallback((nextIsRecording: boolean) => {
+      setIsRecording((prevIsRecording) => {
+        if (!prevIsRecording && nextIsRecording) {
+          setRecordingCycleCount((count) => count + 1);
+        }
+        return nextIsRecording;
+      });
+    }, []);
+
+    // Wrapper for onSubmit that stops TTS first to prevent overlapping voices
+    const handleSubmit = useCallback(
+      (text: string) => {
+        stopTTS();
+        onSubmit(text);
+      },
+      [stopTTS, onSubmit]
+    );
+    const submitMessage = useCallback(
+      (text: string) => {
+        if (!text.trim()) {
+          return;
+        }
+        handleSubmit(text);
+      },
+      [handleSubmit]
+    );
 
     // Expose reset and focus methods to parent via ref
     React.useImperativeHandle(ref, () => ({
@@ -140,15 +204,19 @@ const AppInputBar = React.memo(
         setMessage(initialMessage);
       }
     }, [initialMessage]);
+    const shouldShowRecordingWaveformBelow =
+      isRecording &&
+      !isVoicePlaybackActive &&
+      (isNewSession || recordingCycleCount === 1);
 
-    const { appMode } = useAppMode();
-    const appFocus = useAppFocus();
-    const isSearchMode =
-      (appFocus.isNewSession() && appMode === "search") ||
-      classification === "search";
+    useEffect(() => {
+      if (isNewSession && !initialMessage) {
+        setMessage("");
+      }
+    }, [isNewSession, initialMessage]);
 
     const { forcedToolIds, setForcedToolIds } = useForcedTools();
-    const { currentMessageFiles, setCurrentMessageFiles } =
+    const { currentMessageFiles, setCurrentMessageFiles, currentProjectId } =
       useProjectsContext();
 
     const currentIndexingFiles = useMemo(() => {
@@ -200,9 +268,17 @@ const AppInputBar = React.memo(
       const textarea = textAreaRef.current;
       if (!wrapper || !textarea) return;
 
+      // Reset so scrollHeight reflects actual content size
       wrapper.style.height = `${MIN_INPUT_HEIGHT}px`;
+
+      // scrollHeight doesn't include the wrapper's padding, so add it back
+      const wrapperStyle = getComputedStyle(wrapper);
+      const paddingTop = parseFloat(wrapperStyle.paddingTop);
+      const paddingBottom = parseFloat(wrapperStyle.paddingBottom);
+      const contentHeight = textarea.scrollHeight + paddingTop + paddingBottom;
+
       wrapper.style.height = `${Math.min(
-        Math.max(textarea.scrollHeight, MIN_INPUT_HEIGHT),
+        Math.max(contentHeight, MIN_INPUT_HEIGHT),
         MAX_INPUT_HEIGHT
       )}px`;
     }, [message, isSearchMode]);
@@ -225,20 +301,10 @@ const AppInputBar = React.memo(
     }, [showFiles, currentMessageFiles]);
 
     function handlePaste(event: React.ClipboardEvent) {
-      const items = event.clipboardData?.items;
-      if (items) {
-        const pastedFiles = [];
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          if (item && item.kind === "file") {
-            const file = item.getAsFile();
-            if (file) pastedFiles.push(file);
-          }
-        }
-        if (pastedFiles.length > 0) {
-          event.preventDefault();
-          handleFileUpload(pastedFiles);
-        }
+      const pastedFiles = getPastedFilesIfNoText(event.clipboardData);
+      if (pastedFiles.length > 0) {
+        event.preventDefault();
+        handleFileUpload(pastedFiles);
       }
     }
 
@@ -358,13 +424,19 @@ const AppInputBar = React.memo(
     const showDeepResearch = useMemo(() => {
       const deepResearchGloballyEnabled =
         combinedSettings?.settings?.deep_research_enabled ?? true;
+      const isProjectWorkflow = currentProjectId !== null;
+
+      // TODO(@yuhong): Re-enable Deep Research in Projects workflow once it is fully supported.
+      // https://linear.app/onyx-app/issue/ENG-3818/re-enable-deep-research-in-projects
       return (
+        !isProjectWorkflow &&
         deepResearchGloballyEnabled &&
         hasSearchToolsAvailable(selectedAgent?.tools || [])
       );
     }, [
       selectedAgent?.tools,
       combinedSettings?.settings?.deep_research_enabled,
+      currentProjectId,
     ]);
 
     function handleKeyDownForPromptShortcuts(
@@ -439,13 +511,14 @@ const AppInputBar = React.memo(
             }}
             handleUploadChange={handleUploadChange}
             trigger={(open) => (
-              <Button
-                icon={SvgPlusCircle}
-                tooltip="Attach Files"
-                transient={open}
-                disabled={disabled}
-                prominence="tertiary"
-              />
+              <Disabled disabled={disabled}>
+                <Button
+                  icon={SvgPlusCircle}
+                  tooltip="Attach Files"
+                  interaction={open ? "hover" : "rest"}
+                  prominence="tertiary"
+                />
+              </Disabled>
             )}
             selectedFileIds={currentMessageFiles.map((f) => f.id)}
           />
@@ -467,38 +540,38 @@ const AppInputBar = React.memo(
               />
             )}
             {onToggleTabReading ? (
-              <Button
-                icon={SvgGlobe}
-                onClick={onToggleTabReading}
-                variant="select"
-                selected={tabReadingEnabled}
-                foldable={!tabReadingEnabled}
-                disabled={disabled}
-              >
-                {tabReadingEnabled
-                  ? currentTabUrl
-                    ? (() => {
-                        try {
-                          return new URL(currentTabUrl).hostname;
-                        } catch {
-                          return currentTabUrl;
-                        }
-                      })()
-                    : "Reading tab..."
-                  : "Read this tab"}
-              </Button>
+              <Disabled disabled={disabled}>
+                <SelectButton
+                  icon={SvgGlobe}
+                  onClick={onToggleTabReading}
+                  state={tabReadingEnabled ? "selected" : "empty"}
+                >
+                  {tabReadingEnabled
+                    ? currentTabUrl
+                      ? (() => {
+                          try {
+                            return new URL(currentTabUrl).hostname;
+                          } catch {
+                            return currentTabUrl;
+                          }
+                        })()
+                      : "Reading tab..."
+                    : "Read this tab"}
+                </SelectButton>
+              </Disabled>
             ) : (
               showDeepResearch && (
-                <Button
-                  icon={SvgHourglass}
-                  onClick={toggleDeepResearch}
-                  variant="select"
-                  selected={deepResearchEnabled}
-                  foldable={!deepResearchEnabled}
-                  disabled={disabled}
-                >
-                  Deep Research
-                </Button>
+                <Disabled disabled={disabled}>
+                  <SelectButton
+                    variant="select-light"
+                    icon={SvgHourglass}
+                    onClick={toggleDeepResearch}
+                    state={deepResearchEnabled ? "selected" : "empty"}
+                    foldable={!deepResearchEnabled}
+                  >
+                    Deep Research
+                  </SelectButton>
+                </Disabled>
               )
             )}
 
@@ -512,20 +585,20 @@ const AppInputBar = React.memo(
                   return null;
                 }
                 return (
-                  <Button
-                    key={toolId}
-                    icon={getIconForAction(tool)}
-                    onClick={() => {
-                      setForcedToolIds(
-                        forcedToolIds.filter((id) => id !== toolId)
-                      );
-                    }}
-                    variant="select"
-                    selected
-                    disabled={disabled}
-                  >
-                    {tool.display_name}
-                  </Button>
+                  <Disabled disabled={disabled} key={toolId}>
+                    <SelectButton
+                      variant="select-light"
+                      icon={getIconForAction(tool)}
+                      onClick={() => {
+                        setForcedToolIds(
+                          forcedToolIds.filter((id) => id !== toolId)
+                        );
+                      }}
+                      state="selected"
+                    >
+                      {tool.display_name}
+                    </SelectButton>
+                  </Disabled>
                 );
               })}
           </div>
@@ -543,28 +616,67 @@ const AppInputBar = React.memo(
               disabled={disabled}
             />
           </div>
-          <Button
-            id="onyx-chat-input-send-button"
-            icon={
-              isClassifying
-                ? SimpleLoader
-                : chatState === "input"
-                  ? SvgArrowUp
-                  : SvgStop
-            }
+          {showMicButton &&
+            (sttEnabled ? (
+              <MicrophoneButton
+                onTranscription={(text) => setMessage(text)}
+                disabled={disabled || chatState === "streaming"}
+                autoSend={user?.preferences?.voice_auto_send ?? false}
+                autoListen={user?.preferences?.voice_auto_playback ?? false}
+                isNewSession={isNewSession}
+                chatState={chatState}
+                onRecordingChange={handleRecordingChange}
+                stopRecordingRef={stopRecordingRef}
+                currentMessage={message}
+                onRecordingStart={() => {}}
+                onAutoSend={(text) => {
+                  submitMessage(text);
+                }}
+                onMuteChange={setIsMuted}
+                setMutedRef={setMutedRef}
+                onAudioLevel={setAudioLevel}
+              />
+            ) : (
+              <Disabled disabled>
+                <Button
+                  icon={SvgMicrophone}
+                  aria-label="Set up voice"
+                  prominence="tertiary"
+                  tooltip="Voice not configured. Set up in admin settings."
+                />
+              </Disabled>
+            ))}
+
+          <Disabled
             disabled={
-              (chatState === "input" && !message) ||
+              (chatState === "input" &&
+                !isVoicePlaybackControllable &&
+                !message) ||
               hasUploadingFiles ||
               isClassifying
             }
-            onClick={() => {
-              if (chatState == "streaming") {
-                stopGenerating();
-              } else if (message) {
-                onSubmit(message);
+          >
+            <Button
+              id="onyx-chat-input-send-button"
+              icon={
+                isClassifying
+                  ? SimpleLoader
+                  : chatState === "streaming" || isVoicePlaybackControllable
+                    ? SvgStop
+                    : SvgArrowUp
               }
-            }}
-          />
+              onClick={() => {
+                if (chatState == "streaming") {
+                  stopTTS({ manual: true });
+                  stopGenerating();
+                } else if (isVoicePlaybackControllable) {
+                  stopTTS({ manual: true });
+                } else if (message) {
+                  submitMessage(message);
+                }
+              }}
+            />
+          </Disabled>
         </div>
       </div>
     );
@@ -575,7 +687,7 @@ const AppInputBar = React.memo(
           ref={containerRef}
           id="onyx-chat-input"
           className={cn(
-            "w-full flex flex-col shadow-01 bg-background-neutral-00 rounded-16"
+            "relative w-full flex flex-col shadow-01 bg-background-neutral-00 rounded-16"
             // # Note (from @raunakab):
             //
             // `shadow-01` extends ~14px below the element (2px offset + 12px blur).
@@ -588,6 +700,32 @@ const AppInputBar = React.memo(
             // modes. See the corresponding note there for details.
           )}
         >
+          {/* Voice waveform overlay (positioned outside normal flow to avoid resizing input) */}
+          {isTTSActuallySpeaking ? (
+            <div className="absolute bottom-full mb-1 left-1 z-10">
+              <Waveform
+                variant="speaking"
+                isActive={isTTSActuallySpeaking}
+                isMuted={isTTSMuted}
+                onMuteToggle={toggleTTSMute}
+              />
+            </div>
+          ) : isRecording &&
+            !isVoicePlaybackActive &&
+            !shouldShowRecordingWaveformBelow ? (
+            <div className="absolute bottom-full mb-1 left-1 right-1 z-10">
+              <Waveform
+                variant="recording"
+                isActive={isRecording}
+                isMuted={isMuted}
+                audioLevel={audioLevel}
+                onMuteToggle={() => {
+                  setMutedRef.current?.(!isMuted);
+                }}
+              />
+            </div>
+          ) : null}
+
           {/* Attached Files */}
           <div
             ref={filesWrapperRef}
@@ -639,9 +777,13 @@ const AppInputBar = React.memo(
                     style={{ scrollbarWidth: "thin" }}
                     aria-multiline={true}
                     placeholder={
-                      isSearchMode
-                        ? "Search connected sources"
-                        : "How can I help you today?"
+                      isRecording
+                        ? "Listening..."
+                        : isVoicePlaybackActive
+                          ? "Onyx is speaking..."
+                          : isSearchMode
+                            ? "Search connected sources"
+                            : "How can I help you today?"
                     }
                     value={message}
                     onKeyDown={(event) => {
@@ -658,7 +800,7 @@ const AppInputBar = React.memo(
                           !isClassifying &&
                           !hasUploadingFiles
                         ) {
-                          onSubmit(message);
+                          submitMessage(message);
                         }
                       }
                     }}
@@ -708,31 +850,50 @@ const AppInputBar = React.memo(
 
             {isSearchMode && (
               <Section flexDirection="row" width="fit" gap={0}>
-                <Button
-                  icon={SvgX}
-                  disabled={!message || isClassifying}
-                  onClick={() => setMessage("")}
-                  prominence="tertiary"
-                />
-                <Button
-                  id="onyx-chat-input-send-button"
-                  icon={isClassifying ? SimpleLoader : SvgSearch}
+                <Disabled disabled={!message || isClassifying}>
+                  <Button
+                    icon={SvgX}
+                    onClick={() => setMessage("")}
+                    prominence="tertiary"
+                  />
+                </Disabled>
+                <Disabled
                   disabled={!message || isClassifying || hasUploadingFiles}
-                  onClick={() => {
-                    if (chatState == "streaming") {
-                      stopGenerating();
-                    } else if (message) {
-                      onSubmit(message);
-                    }
-                  }}
-                  prominence="tertiary"
-                />
+                >
+                  <Button
+                    id="onyx-chat-input-send-button"
+                    icon={isClassifying ? SimpleLoader : SvgSearch}
+                    onClick={() => {
+                      if (chatState == "streaming") {
+                        stopGenerating();
+                      } else if (message) {
+                        submitMessage(message);
+                      }
+                    }}
+                    prominence="tertiary"
+                  />
+                </Disabled>
                 <Spacer horizontal rem={0.25} />
               </Section>
             )}
           </div>
 
           {chatControls}
+
+          {/* First recording cycle waveform below input */}
+          {shouldShowRecordingWaveformBelow && (
+            <div className="absolute top-full mt-1 left-1 right-1 z-10">
+              <Waveform
+                variant="recording"
+                isActive={isRecording}
+                isMuted={isMuted}
+                audioLevel={audioLevel}
+                onMuteToggle={() => {
+                  setMutedRef.current?.(!isMuted);
+                }}
+              />
+            </div>
+          )}
         </div>
       </Disabled>
     );

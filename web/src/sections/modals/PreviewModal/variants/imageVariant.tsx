@@ -8,9 +8,10 @@ import {
 
 export const imageVariant: PreviewVariant = {
   matches: (_name, mime) => mime.startsWith("image/"),
-  width: "lg",
+  width: "full",
   height: "full",
   needsTextContent: false,
+  codeBackground: false,
   headerDescription: () => "",
 
   renderContent: (ctx) => (

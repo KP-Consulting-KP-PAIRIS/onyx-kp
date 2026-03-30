@@ -1,5 +1,8 @@
 # Onyx CLI
 
+[![Release CLI](https://github.com/onyx-dot-app/onyx/actions/workflows/release-cli.yml/badge.svg)](https://github.com/onyx-dot-app/onyx/actions/workflows/release-cli.yml)
+[![PyPI](https://img.shields.io/pypi/v/onyx-cli.svg)](https://pypi.org/project/onyx-cli/)
+
 A terminal interface for chatting with your [Onyx](https://github.com/onyx-dot-app/onyx) agent. Built with Go using [Bubble Tea](https://github.com/charmbracelet/bubbletea) for the TUI framework.
 
 ## Installation
@@ -28,7 +31,7 @@ Environment variables override config file values:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ONYX_SERVER_URL` | No | Server base URL (default: `http://localhost:3000`) |
+| `ONYX_SERVER_URL` | No | Server base URL (default: `https://cloud.onyx.app`) |
 | `ONYX_API_KEY` | Yes | API key for authentication |
 | `ONYX_PERSONA_ID` | No | Default agent/persona ID |
 
@@ -60,6 +63,31 @@ onyx-cli agents
 onyx-cli agents --json
 ```
 
+### Serve over SSH
+
+```shell
+# Start a public SSH endpoint for the CLI TUI
+onyx-cli serve --host 0.0.0.0 --port 2222
+
+# Connect as a client
+ssh your-host -p 2222
+```
+
+Clients can either:
+- paste an API key at the login prompt, or
+- skip the prompt by sending `ONYX_API_KEY` over SSH:
+
+```shell
+export ONYX_API_KEY=your-key
+ssh -o SendEnv=ONYX_API_KEY your-host -p 2222
+```
+
+Useful hardening flags:
+- `--idle-timeout` (default `15m`)
+- `--max-session-timeout` (default `8h`)
+- `--rate-limit-per-minute` (default `20`)
+- `--rate-limit-burst` (default `40`)
+
 ## Commands
 
 | Command | Description |
@@ -67,18 +95,19 @@ onyx-cli agents --json
 | `chat` | Launch the interactive chat TUI (default) |
 | `ask` | Ask a one-shot question (non-interactive) |
 | `agents` | List available agents |
+| `serve` | Serve the interactive chat TUI over SSH |
 | `configure` | Configure server URL and API key |
+| `validate-config` | Validate configuration and test connection |
 
 ## Slash Commands (in TUI)
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show help message |
-| `/new` | Start a new chat session |
+| `/clear` | Clear chat and start a new session |
 | `/agent` | List and switch agents |
 | `/attach <path>` | Attach a file to next message |
 | `/sessions` | List recent chat sessions |
-| `/clear` | Clear the chat display |
 | `/configure` | Re-run connection setup |
 | `/connectors` | Open connectors in browser |
 | `/settings` | Open settings in browser |
@@ -116,3 +145,43 @@ go build -o onyx-cli .
 # Lint
 staticcheck ./...
 ```
+
+## Publishing to PyPI
+
+The CLI is distributed as a Python package via [PyPI](https://pypi.org/project/onyx-cli/). The build system uses [hatchling](https://hatch.pypa.io/) with [manygo](https://github.com/nicholasgasior/manygo) to cross-compile Go binaries into platform-specific wheels.
+
+### CI release (recommended)
+
+Tag a release and push — the `release-cli.yml` workflow builds wheels for all platforms and publishes to PyPI automatically:
+
+```shell
+tag --prefix cli
+```
+
+To do this manually:
+
+```shell
+git tag cli/v0.1.0
+git push origin cli/v0.1.0
+```
+
+The workflow builds wheels for: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64.
+
+### Manual release
+
+Build a wheel locally with `uv`. Set `GOOS` and `GOARCH` to cross-compile for other platforms (Go handles this natively — no cross-compiler needed):
+
+```shell
+# Build for current platform
+uv build --wheel
+
+# Cross-compile for a different platform
+GOOS=linux GOARCH=amd64 uv build --wheel
+
+# Upload to PyPI
+uv publish
+```
+
+### Versioning
+
+Versions are derived from git tags with the `cli/` prefix (e.g. `cli/v0.1.0`). The tag is parsed by `internal/_version.py` and injected into the Go binary via `-ldflags` at build time.

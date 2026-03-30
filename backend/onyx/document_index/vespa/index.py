@@ -6,6 +6,7 @@ import re
 import time
 import urllib
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
@@ -220,7 +221,6 @@ def cleanup_chunks(chunks: list[InferenceChunkUncleaned]) -> list[InferenceChunk
 
 
 class VespaIndex(DocumentIndex):
-
     VESPA_SCHEMA_JINJA_FILENAME = "danswer_chunk.sd.jinja"
 
     def __init__(
@@ -462,7 +462,7 @@ class VespaIndex(DocumentIndex):
 
     def index(
         self,
-        chunks: list[DocMetadataAwareIndexChunk],
+        chunks: Iterable[DocMetadataAwareIndexChunk],
         index_batch_params: IndexBatchParams,
     ) -> set[OldDocumentInsertionRecord]:
         """
@@ -604,10 +604,7 @@ class VespaIndex(DocumentIndex):
                     try:
                         res.raise_for_status()
                     except requests.HTTPError as e:
-                        failure_msg = (
-                            f"Failed to update document {future_to_document_id[future]}\n"
-                            f"Response: {res.text}"
-                        )
+                        failure_msg = f"Failed to update document {future_to_document_id[future]}\nResponse: {res.text}"
                         raise requests.HTTPError(failure_msg) from e
 
     def kg_chunk_updates(
@@ -690,9 +687,12 @@ class VespaIndex(DocumentIndex):
             )
 
         project_ids: set[int] | None = None
+        # NOTE: Empty user_projects is semantically different from None
+        # user_projects.
         if user_fields is not None and user_fields.user_projects is not None:
             project_ids = set(user_fields.user_projects)
         persona_ids: set[int] | None = None
+        # NOTE: Empty personas is semantically different from None personas.
         if user_fields is not None and user_fields.personas is not None:
             persona_ids = set(user_fields.personas)
         update_request = MetadataUpdateRequest(
@@ -1104,7 +1104,4 @@ class _VespaDeleteRequest:
         self.document_id = document_id
         # Encode the document ID to ensure it's safe for use in the URL
         encoded_doc_id = urllib.parse.quote_plus(self.document_id)
-        self.url = (
-            f"{VESPA_APPLICATION_ENDPOINT}/document/v1/"
-            f"{index_name}/{index_name}/docid/{encoded_doc_id}"
-        )
+        self.url = f"{VESPA_APPLICATION_ENDPOINT}/document/v1/{index_name}/{index_name}/docid/{encoded_doc_id}"

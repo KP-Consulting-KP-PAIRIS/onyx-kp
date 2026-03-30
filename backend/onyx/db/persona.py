@@ -50,8 +50,18 @@ from onyx.utils.variable_functionality import fetch_versioned_implementation
 logger = setup_logger()
 
 
-def get_default_behavior_persona(db_session: Session) -> Persona | None:
+def get_default_behavior_persona(
+    db_session: Session,
+    eager_load_for_tools: bool = False,
+) -> Persona | None:
     stmt = select(Persona).where(Persona.id == DEFAULT_PERSONA_ID)
+    if eager_load_for_tools:
+        stmt = stmt.options(
+            selectinload(Persona.tools),
+            selectinload(Persona.document_sets),
+            selectinload(Persona.attached_documents),
+            selectinload(Persona.hierarchy_nodes),
+        )
     return db_session.scalars(stmt).first()
 
 
@@ -126,7 +136,7 @@ def _add_user_filters(
     else:
         # Group the public persona conditions
         public_condition = (Persona.is_public == True) & (  # noqa: E712
-            Persona.is_visible == True  # noqa: E712
+            Persona.is_listed == True  # noqa: E712
         )
 
         where_clause |= public_condition
@@ -205,7 +215,9 @@ def update_persona_access(
 
     NOTE: Callers are responsible for committing."""
 
+    needs_sync = False
     if is_public is not None:
+        needs_sync = True
         persona = db_session.query(Persona).filter(Persona.id == persona_id).first()
         if persona:
             persona.is_public = is_public
@@ -213,6 +225,7 @@ def update_persona_access(
     # NOTE: For user-ids and group-ids, `None` means "leave unchanged", `[]` means "clear all shares",
     # and a non-empty list means "replace with these shares".
     if user_ids is not None:
+        needs_sync = True
         db_session.query(Persona__User).filter(
             Persona__User.persona_id == persona_id
         ).delete(synchronize_session="fetch")
@@ -233,12 +246,17 @@ def update_persona_access(
     # MIT doesn't support group-based sharing, so we allow clearing (no-op since
     # there shouldn't be any) but raise an error if trying to add actual groups.
     if group_ids is not None:
+        needs_sync = True
         db_session.query(Persona__UserGroup).filter(
             Persona__UserGroup.persona_id == persona_id
         ).delete(synchronize_session="fetch")
 
         if group_ids:
             raise NotImplementedError("Onyx MIT does not support group-based sharing")
+
+    # When sharing changes, user file ACLs need to be updated in the vector DB
+    if needs_sync:
+        mark_persona_user_files_for_sync(persona_id, db_session)
 
 
 def create_update_persona(
@@ -252,8 +270,7 @@ def create_update_persona(
 
     try:
         # Featured persona validation
-        if create_persona_request.featured:
-
+        if create_persona_request.is_featured:
             # Curators can edit featured personas, but not make them
             # TODO this will be reworked soon with RBAC permissions feature
             if user.role == UserRole.CURATOR or user.role == UserRole.GLOBAL_CURATOR:
@@ -293,7 +310,7 @@ def create_update_persona(
             remove_image=create_persona_request.remove_image,
             search_start_date=create_persona_request.search_start_date,
             label_ids=create_persona_request.label_ids,
-            featured=create_persona_request.featured,
+            is_featured=create_persona_request.is_featured,
             user_file_ids=converted_user_file_ids,
             commit=False,
             hierarchy_node_ids=create_persona_request.hierarchy_node_ids,
@@ -851,6 +868,24 @@ def update_personas_display_priority(
         db_session.commit()
 
 
+def mark_persona_user_files_for_sync(
+    persona_id: int,
+    db_session: Session,
+) -> None:
+    """When persona sharing changes, mark all of its user files for sync
+    so that their ACLs get updated in the vector DB."""
+    persona = (
+        db_session.query(Persona)
+        .options(selectinload(Persona.user_files))
+        .filter(Persona.id == persona_id)
+        .first()
+    )
+    if not persona:
+        return
+    file_ids = [uf.id for uf in persona.user_files]
+    _mark_files_need_persona_sync(db_session, file_ids)
+
+
 def _mark_files_need_persona_sync(
     db_session: Session,
     user_file_ids: list[UUID],
@@ -885,11 +920,11 @@ def upsert_persona(
     uploaded_image_id: str | None = None,
     icon_name: str | None = None,
     display_priority: int | None = None,
-    is_visible: bool = True,
+    is_listed: bool = True,
     remove_image: bool | None = None,
     search_start_date: datetime | None = None,
     builtin_persona: bool = False,
-    featured: bool | None = None,
+    is_featured: bool | None = None,
     label_ids: list[int] | None = None,
     user_file_ids: list[UUID] | None = None,
     hierarchy_node_ids: list[int] | None = None,
@@ -1012,13 +1047,13 @@ def upsert_persona(
         if remove_image or uploaded_image_id:
             existing_persona.uploaded_image_id = uploaded_image_id
         existing_persona.icon_name = icon_name
-        existing_persona.is_visible = is_visible
+        existing_persona.is_listed = is_listed
         existing_persona.search_start_date = search_start_date
         if label_ids is not None:
             existing_persona.labels.clear()
             existing_persona.labels = labels or []
-        existing_persona.featured = (
-            featured if featured is not None else existing_persona.featured
+        existing_persona.is_featured = (
+            is_featured if is_featured is not None else existing_persona.is_featured
         )
         # Update embedded prompt fields if provided
         if system_prompt is not None:
@@ -1084,9 +1119,9 @@ def upsert_persona(
             uploaded_image_id=uploaded_image_id,
             icon_name=icon_name,
             display_priority=display_priority,
-            is_visible=is_visible,
+            is_listed=is_listed,
             search_start_date=search_start_date,
-            featured=(featured if featured is not None else False),
+            is_featured=(is_featured if is_featured is not None else False),
             user_files=user_files or [],
             labels=labels or [],
             hierarchy_nodes=hierarchy_nodes or [],
@@ -1133,7 +1168,7 @@ def delete_old_default_personas(
 
 def update_persona_featured(
     persona_id: int,
-    featured: bool,
+    is_featured: bool,
     db_session: Session,
     user: User,
 ) -> None:
@@ -1141,13 +1176,13 @@ def update_persona_featured(
         db_session=db_session, persona_id=persona_id, user=user, get_editable=True
     )
 
-    persona.featured = featured
+    persona.is_featured = is_featured
     db_session.commit()
 
 
 def update_persona_visibility(
     persona_id: int,
-    is_visible: bool,
+    is_listed: bool,
     db_session: Session,
     user: User,
 ) -> None:
@@ -1155,7 +1190,7 @@ def update_persona_visibility(
         db_session=db_session, persona_id=persona_id, user=user, get_editable=True
     )
 
-    persona.is_visible = is_visible
+    persona.is_listed = is_listed
     db_session.commit()
 
 

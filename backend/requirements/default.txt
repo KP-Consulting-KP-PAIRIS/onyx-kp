@@ -65,8 +65,10 @@ attrs==25.4.0
     #   jsonschema
     #   referencing
     #   zeep
-authlib==1.6.7
+authlib==1.6.9
     # via fastmcp
+azure-cognitiveservices-speech==1.38.0
+    # via onyx
 babel==2.17.0
     # via courlan
 backoff==2.2.1
@@ -185,7 +187,7 @@ coloredlogs==15.0.1
     # via onnxruntime
 courlan==1.3.2
     # via trafilatura
-cryptography==46.0.5
+cryptography==46.0.6
     # via
     #   authlib
     #   google-auth
@@ -447,7 +449,7 @@ kombu==5.5.4
     # via celery
 kubernetes==31.0.0
     # via onyx
-langchain-core==1.2.11
+langchain-core==1.2.22
     # via onyx
 langdetect==1.0.9
     # via unstructured
@@ -547,7 +549,7 @@ mypy-extensions==1.0.0
     #   typing-inspect
 nest-asyncio==1.6.0
     # via onyx
-nltk==3.9.3
+nltk==3.9.4
     # via unstructured
 numpy==2.4.1
     # via
@@ -614,7 +616,7 @@ opentelemetry-sdk==1.39.1
     #   opentelemetry-exporter-otlp-proto-http
 opentelemetry-semantic-conventions==0.60b1
     # via opentelemetry-sdk
-orjson==3.11.4 ; platform_python_implementation != 'PyPy'
+orjson==3.11.6 ; platform_python_implementation != 'PyPy'
     # via langsmith
 packaging==24.2
     # via
@@ -696,7 +698,7 @@ py-key-value-aio==0.4.4
     # via fastmcp
 pyairtable==3.0.1
     # via onyx
-pyasn1==0.6.2
+pyasn1==0.6.3
     # via
     #   pyasn1-modules
     #   rsa
@@ -735,7 +737,7 @@ pygithub==2.5.0
     # via onyx
 pygments==2.19.2
     # via rich
-pyjwt==2.11.0
+pyjwt==2.12.0
     # via
     #   fastapi-users
     #   mcp
@@ -750,7 +752,7 @@ pypandoc-binary==1.16.2
     # via onyx
 pyparsing==3.2.5
     # via httplib2
-pypdf==6.7.5
+pypdf==6.9.2
     # via
     #   onyx
     #   unstructured-client
@@ -859,7 +861,7 @@ regex==2025.11.3
     #   dateparser
     #   nltk
     #   tiktoken
-requests==2.32.5
+requests==2.33.0
     # via
     #   atlassian-python-api
     #   braintrust
@@ -1020,7 +1022,7 @@ toolz==1.1.0
     #   dask
     #   distributed
     #   partd
-tornado==6.5.2
+tornado==6.5.5
     # via distributed
 tqdm==4.67.1
     # via

@@ -420,3 +420,47 @@ class LLMProviderResponse(BaseModel, Generic[T]):
             default_text=default_text,
             default_vision=default_vision,
         )
+
+
+class SyncModelEntry(BaseModel):
+    """Typed model for syncing fetched models to the DB."""
+
+    name: str
+    display_name: str
+    max_input_tokens: int | None = None
+    supports_image_input: bool = False
+
+
+class LitellmModelsRequest(BaseModel):
+    api_key: str
+    api_base: str
+    provider_name: str | None = None  # Optional: to save models to existing provider
+
+
+class LitellmModelDetails(BaseModel):
+    """Response model for Litellm proxy /api/v1/models endpoint"""
+
+    id: str  # Model ID (e.g. "gpt-4o")
+    object: str  # "model"
+    created: int  # Unix timestamp in seconds
+    owned_by: str  # Provider name (e.g. "openai")
+
+
+class LitellmFinalModelResponse(BaseModel):
+    provider_name: str  # Provider name (e.g. "openai")
+    model_name: str  # Model ID (e.g. "gpt-4o")
+
+
+# Bifrost dynamic models fetch
+class BifrostModelsRequest(BaseModel):
+    api_base: str
+    api_key: str | None = None
+    provider_name: str | None = None  # Optional: to save models to existing provider
+
+
+class BifrostFinalModelResponse(BaseModel):
+    name: str  # Model ID in provider/model format (e.g. "anthropic/claude-sonnet-4-6")
+    display_name: str  # Human-readable name from Bifrost API
+    max_input_tokens: int | None
+    supports_image_input: bool
+    supports_reasoning: bool

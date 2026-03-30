@@ -75,7 +75,7 @@ module.exports = {
         "very-short": { raw: "(max-height: 600px)" },
       },
       fontFamily: {
-        sans: ["Hanken Grotesk", "var(--font-inter)", "sans-serif"],
+        sans: ["Hanken Grotesk", "sans-serif"],
         hanken: ["Hanken Grotesk", "sans-serif"],
       },
       width: {
@@ -260,6 +260,7 @@ module.exports = {
         "code-string": "var(--code-string)",
         "code-number": "var(--code-number)",
         "code-definition": "var(--code-definition)",
+        "background-code-01": "var(--background-code-01)",
 
         // Shimmer colors for loading animations
         "shimmer-base": "var(--shimmer-base)",

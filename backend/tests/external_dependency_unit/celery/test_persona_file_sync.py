@@ -91,7 +91,7 @@ def _create_test_persona(
         document_sets=[],
         users=[user],
         groups=[],
-        is_visible=True,
+        is_listed=True,
         is_public=True,
         display_priority=None,
         starter_messages=None,
@@ -114,10 +114,7 @@ def _link_file_to_persona(
     db_session.commit()
 
 
-_PATCH_QUEUE_DEPTH = (
-    "onyx.background.celery.tasks.user_file_processing.tasks"
-    ".get_user_file_project_sync_queue_depth"
-)
+_PATCH_QUEUE_DEPTH = "onyx.background.celery.tasks.user_file_processing.tasks.get_user_file_project_sync_queue_depth"
 
 
 @contextmanager
@@ -132,6 +129,10 @@ def _patch_task_app(task: Any, mock_app: MagicMock) -> Generator[None, None, Non
             return_value=mock_app,
         ),
         patch(_PATCH_QUEUE_DEPTH, return_value=0),
+        patch(
+            "onyx.background.celery.tasks.user_file_processing.tasks.celery_get_broker_client",
+            return_value=MagicMock(),
+        ),
     ):
         yield
 

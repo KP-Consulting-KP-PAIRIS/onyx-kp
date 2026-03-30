@@ -237,7 +237,7 @@ export default function AgentViewerModal({ agent }: AgentViewerModalProps) {
       onOpenChange={agentViewerModal.toggle}
     >
       <Modal.Content
-        width="md-sm"
+        width="lg"
         height="lg"
         bottomSlot={<AgentChatInput agent={agent} onSubmit={handleStartChat} />}
       >
@@ -250,12 +250,13 @@ export default function AgentViewerModal({ agent }: AgentViewerModalProps) {
         <Modal.Body>
           {/* Metadata */}
           <Section flexDirection="row" justifyContent="start">
-            {agent.featured && (
+            {agent.is_featured && (
               <Content
                 icon={SvgStar}
                 title="Featured"
                 sizePreset="main-ui"
                 variant="body"
+                widthVariant="fit"
               />
             )}
             <Content
@@ -264,6 +265,7 @@ export default function AgentViewerModal({ agent }: AgentViewerModalProps) {
               sizePreset="main-ui"
               variant="body"
               prominence="muted"
+              widthVariant="fit"
             />
             {agent.is_public && (
               <Content
@@ -272,6 +274,7 @@ export default function AgentViewerModal({ agent }: AgentViewerModalProps) {
                 sizePreset="main-ui"
                 variant="body"
                 prominence="muted"
+                widthVariant="fit"
               />
             )}
           </Section>
@@ -404,7 +407,7 @@ export default function AgentViewerModal({ agent }: AgentViewerModalProps) {
               />
               <div className="grid grid-cols-2 gap-1 w-full">
                 {agent.starter_messages.map((starter, index) => (
-                  <Interactive.Base
+                  <Interactive.Stateless
                     key={index}
                     onClick={() => handleStartChat(starter.message)}
                     prominence="tertiary"
@@ -419,7 +422,7 @@ export default function AgentViewerModal({ agent }: AgentViewerModalProps) {
                         widthVariant="full"
                       />
                     </Interactive.Container>
-                  </Interactive.Base>
+                  </Interactive.Stateless>
                 ))}
               </div>
             </>

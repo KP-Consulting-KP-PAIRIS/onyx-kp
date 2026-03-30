@@ -1,15 +1,17 @@
 import { LLMProviderName, LLMProviderView } from "@/interfaces/llm";
-import { AnthropicModal } from "./AnthropicModal";
-import { OpenAIModal } from "./OpenAIModal";
-import { OllamaModal } from "./OllamaModal";
-import { AzureModal } from "./AzureModal";
-import { VertexAIModal } from "./VertexAIModal";
-import { OpenRouterModal } from "./OpenRouterModal";
-import { CustomModal } from "./CustomModal";
-import { BedrockModal } from "./BedrockModal";
-import { LMStudioForm } from "./LMStudioForm";
+import AnthropicModal from "@/sections/modals/llmConfig/AnthropicModal";
+import OpenAIModal from "@/sections/modals/llmConfig/OpenAIModal";
+import OllamaModal from "@/sections/modals/llmConfig/OllamaModal";
+import AzureModal from "@/sections/modals/llmConfig/AzureModal";
+import VertexAIModal from "@/sections/modals/llmConfig/VertexAIModal";
+import OpenRouterModal from "@/sections/modals/llmConfig/OpenRouterModal";
+import CustomModal from "@/sections/modals/llmConfig/CustomModal";
+import BedrockModal from "@/sections/modals/llmConfig/BedrockModal";
+import LMStudioForm from "@/sections/modals/llmConfig/LMStudioForm";
+import LiteLLMProxyModal from "@/sections/modals/llmConfig/LiteLLMProxyModal";
+import BifrostModal from "@/sections/modals/llmConfig/BifrostModal";
 
-export function detectIfRealOpenAIProvider(provider: LLMProviderView) {
+function detectIfRealOpenAIProvider(provider: LLMProviderView) {
   return (
     provider.provider === LLMProviderName.OPENAI &&
     provider.api_key &&
@@ -21,9 +23,15 @@ export function detectIfRealOpenAIProvider(provider: LLMProviderView) {
 export function getModalForExistingProvider(
   provider: LLMProviderView,
   open?: boolean,
-  onOpenChange?: (open: boolean) => void
+  onOpenChange?: (open: boolean) => void,
+  defaultModelName?: string
 ) {
-  const props = { existingLlmProvider: provider, open, onOpenChange };
+  const props = {
+    existingLlmProvider: provider,
+    open,
+    onOpenChange,
+    defaultModelName,
+  };
 
   switch (provider.provider) {
     case LLMProviderName.OPENAI:
@@ -47,6 +55,10 @@ export function getModalForExistingProvider(
       return <OpenRouterModal {...props} />;
     case LLMProviderName.LM_STUDIO:
       return <LMStudioForm {...props} />;
+    case LLMProviderName.LITELLM_PROXY:
+      return <LiteLLMProxyModal {...props} />;
+    case LLMProviderName.BIFROST:
+      return <BifrostModal {...props} />;
     default:
       return <CustomModal {...props} />;
   }

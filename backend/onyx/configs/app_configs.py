@@ -44,6 +44,31 @@ SEND_USER_METADATA_TO_LLM_PROVIDER = (
 # User Facing Features Configs
 #####
 BLURB_SIZE = 128  # Number Encoder Tokens included in the chunk blurb
+
+# Hard ceiling for the admin-configurable file upload size (in MB).
+# Self-hosted customers can raise or lower this via the environment variable.
+_raw_max_upload_size_mb = int(os.environ.get("MAX_ALLOWED_UPLOAD_SIZE_MB", "250"))
+if _raw_max_upload_size_mb < 0:
+    logger.warning(
+        "MAX_ALLOWED_UPLOAD_SIZE_MB=%d is negative; falling back to 250",
+        _raw_max_upload_size_mb,
+    )
+    _raw_max_upload_size_mb = 250
+MAX_ALLOWED_UPLOAD_SIZE_MB = _raw_max_upload_size_mb
+
+# Default fallback for the per-user file upload size limit (in MB) when no
+# admin-configured value exists.  Clamped to MAX_ALLOWED_UPLOAD_SIZE_MB at
+# runtime so this never silently exceeds the hard ceiling.
+_raw_default_upload_size_mb = int(
+    os.environ.get("DEFAULT_USER_FILE_MAX_UPLOAD_SIZE_MB", "100")
+)
+if _raw_default_upload_size_mb < 0:
+    logger.warning(
+        "DEFAULT_USER_FILE_MAX_UPLOAD_SIZE_MB=%d is negative; falling back to 100",
+        _raw_default_upload_size_mb,
+    )
+    _raw_default_upload_size_mb = 100
+DEFAULT_USER_FILE_MAX_UPLOAD_SIZE_MB = _raw_default_upload_size_mb
 GENERATIVE_MODEL_ACCESS_CHECK_FREQ = int(
     os.environ.get("GENERATIVE_MODEL_ACCESS_CHECK_FREQ") or 86400
 )  # 1 day
@@ -59,13 +84,6 @@ DISABLE_VECTOR_DB = os.environ.get("DISABLE_VECTOR_DB", "").lower() == "true"
 # "redis" (default) or "postgres" (only valid when DISABLE_VECTOR_DB=true).
 CACHE_BACKEND = CacheBackendType(
     os.environ.get("CACHE_BACKEND", CacheBackendType.REDIS)
-)
-
-# Maximum token count for a single uploaded file. Files exceeding this are rejected.
-# Defaults to 100k tokens (or 10M when vector DB is disabled).
-_DEFAULT_FILE_TOKEN_LIMIT = 10_000_000 if DISABLE_VECTOR_DB else 100_000
-FILE_TOKEN_COUNT_THRESHOLD = int(
-    os.environ.get("FILE_TOKEN_COUNT_THRESHOLD", str(_DEFAULT_FILE_TOKEN_LIMIT))
 )
 
 # If set to true, will show extra/uncommon connectors in the "Other" category
@@ -92,19 +110,12 @@ WEB_DOMAIN = os.environ.get("WEB_DOMAIN") or "http://localhost:3000"
 #####
 # Auth Configs
 #####
-# Upgrades users from disabled auth to basic auth and shows warning.
-_auth_type_str = (os.environ.get("AUTH_TYPE") or "basic").lower()
-if _auth_type_str == "disabled":
-    logger.warning(
-        "AUTH_TYPE='disabled' is no longer supported. "
-        "Defaulting to 'basic'. Please update your configuration. "
-        "Your existing data will be migrated automatically."
-    )
-    _auth_type_str = AuthType.BASIC.value
-try:
+# Silently default to basic - warnings/errors logged in verify_auth_setting()
+# which only runs on app startup, not during migrations/scripts
+_auth_type_str = (os.environ.get("AUTH_TYPE") or "").lower()
+if _auth_type_str in [auth_type.value for auth_type in AuthType]:
     AUTH_TYPE = AuthType(_auth_type_str)
-except ValueError:
-    logger.error(f"Invalid AUTH_TYPE: {_auth_type_str}. Defaulting to 'basic'.")
+else:
     AUTH_TYPE = AuthType.BASIC
 
 PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", 8))
@@ -199,6 +210,10 @@ if _OIDC_SCOPE_OVERRIDE:
     except Exception:
         pass
 
+# Enables PKCE for OIDC login flow. Disabled by default to preserve
+# backwards compatibility for existing OIDC deployments.
+OIDC_PKCE_ENABLED = os.environ.get("OIDC_PKCE_ENABLED", "").lower() == "true"
+
 # Applicable for SAML Auth
 SAML_CONF_DIR = os.environ.get("SAML_CONF_DIR") or "/app/onyx/configs/saml_config"
 
@@ -206,6 +221,12 @@ SAML_CONF_DIR = os.environ.get("SAML_CONF_DIR") or "/app/onyx/configs/saml_confi
 JWT_PUBLIC_KEY_URL: str | None = os.getenv("JWT_PUBLIC_KEY_URL", None)
 
 USER_AUTH_SECRET = os.environ.get("USER_AUTH_SECRET", "")
+
+if AUTH_TYPE == AuthType.BASIC and not USER_AUTH_SECRET:
+    logger.warning(
+        "USER_AUTH_SECRET is not set. This is required for secure password reset "
+        "and email verification tokens. Please set USER_AUTH_SECRET in production."
+    )
 
 # Duration (in seconds) for which the FastAPI Users JWT token remains valid in the user's browser.
 # By default, this is set to match the Redis expiry time for consistency.
@@ -271,14 +292,17 @@ USING_AWS_MANAGED_OPENSEARCH = (
 OPENSEARCH_PROFILING_DISABLED = (
     os.environ.get("OPENSEARCH_PROFILING_DISABLED", "").lower() == "true"
 )
-
+# Whether to disable match highlights for OpenSearch. Defaults to True for now
+# as we investigate query performance.
+OPENSEARCH_MATCH_HIGHLIGHTS_DISABLED = (
+    os.environ.get("OPENSEARCH_MATCH_HIGHLIGHTS_DISABLED", "true").lower() == "true"
+)
 # When enabled, OpenSearch returns detailed score breakdowns for each hit.
 # Useful for debugging and tuning search relevance. Has ~10-30% performance overhead according to documentation.
 # Seems for Hybrid Search in practice, the impact is actually more like 1000x slower.
 OPENSEARCH_EXPLAIN_ENABLED = (
     os.environ.get("OPENSEARCH_EXPLAIN_ENABLED", "").lower() == "true"
 )
-
 # Analyzer used for full-text fields (title, content). Use OpenSearch built-in analyzer
 # names (e.g. "english", "standard", "german"). Affects stemming and tokenization;
 # existing indices need reindexing after a change.
@@ -288,8 +312,9 @@ OPENSEARCH_TEXT_ANALYZER = os.environ.get("OPENSEARCH_TEXT_ANALYZER") or "englis
 # environments we always want to be dual indexing into both OpenSearch and Vespa
 # to stress test the new codepaths. Only enable this if there is some instance
 # of OpenSearch running for the relevant Onyx instance.
+# NOTE: Now enabled on by default, unless the env indicates otherwise.
 ENABLE_OPENSEARCH_INDEXING_FOR_ONYX = (
-    os.environ.get("ENABLE_OPENSEARCH_INDEXING_FOR_ONYX", "").lower() == "true"
+    os.environ.get("ENABLE_OPENSEARCH_INDEXING_FOR_ONYX", "true").lower() == "true"
 )
 # NOTE: This effectively does nothing anymore, admins can now toggle whether
 # retrieval is through OpenSearch. This value is only used as a final fallback
@@ -305,6 +330,24 @@ ENABLE_OPENSEARCH_RETRIEVAL_FOR_ONYX = (
 # instantiate an OpenSearchDocumentIndex on multitenant cloud. Defaults to True.
 VERIFY_CREATE_OPENSEARCH_INDEX_ON_INIT_MT = (
     os.environ.get("VERIFY_CREATE_OPENSEARCH_INDEX_ON_INIT_MT", "true").lower()
+    == "true"
+)
+OPENSEARCH_MIGRATION_GET_VESPA_CHUNKS_PAGE_SIZE = int(
+    os.environ.get("OPENSEARCH_MIGRATION_GET_VESPA_CHUNKS_PAGE_SIZE") or 500
+)
+# If set, will override the default number of shards and replicas for the index.
+OPENSEARCH_INDEX_NUM_SHARDS: int | None = (
+    int(os.environ["OPENSEARCH_INDEX_NUM_SHARDS"])
+    if os.environ.get("OPENSEARCH_INDEX_NUM_SHARDS", None) is not None
+    else None
+)
+OPENSEARCH_INDEX_NUM_REPLICAS: int | None = (
+    int(os.environ["OPENSEARCH_INDEX_NUM_REPLICAS"])
+    if os.environ.get("OPENSEARCH_INDEX_NUM_REPLICAS", None) is not None
+    else None
+)
+ONYX_SEARCH_UI_USES_OPENSEARCH_KEYWORD_SEARCH = (
+    os.environ.get("ONYX_SEARCH_UI_USES_OPENSEARCH_KEYWORD_SEARCH", "").lower()
     == "true"
 )
 
@@ -762,6 +805,10 @@ MINI_CHUNK_SIZE = 150
 # This is the number of regular chunks per large chunk
 LARGE_CHUNK_RATIO = 4
 
+# The maximum number of chunks that can be held for 1 document processing batch
+# The purpose of this is to set an upper bound on memory usage
+MAX_CHUNKS_PER_DOC_BATCH = int(os.environ.get("MAX_CHUNKS_PER_DOC_BATCH") or 1000)
+
 # Include the document level metadata in each chunk. If the metadata is too long, then it is thrown out
 # We don't want the metadata to overwhelm the actual contents of the chunk
 SKIP_METADATA_IN_CHUNK = os.environ.get("SKIP_METADATA_IN_CHUNK", "").lower() == "true"
@@ -1031,6 +1078,8 @@ POD_NAMESPACE = os.environ.get("POD_NAMESPACE")
 
 
 DEV_MODE = os.environ.get("DEV_MODE", "").lower() == "true"
+
+HOOK_ENABLED = os.environ.get("HOOK_ENABLED", "").lower() == "true"
 
 INTEGRATION_TESTS_MODE = os.environ.get("INTEGRATION_TESTS_MODE", "").lower() == "true"
 
