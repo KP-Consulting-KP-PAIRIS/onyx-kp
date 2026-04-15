@@ -1,7 +1,10 @@
-import "@opal/components/tooltip.css";
-
-/* Shared types */
-export type TooltipSide = "top" | "bottom" | "left" | "right";
+/* Tooltip */
+export {
+  Tooltip,
+  type TooltipProps,
+  type TooltipSide,
+  type TooltipAlign,
+} from "@opal/components/tooltip/components";
 
 /* Button */
 export {
@@ -53,6 +56,12 @@ export {
   type TagProps,
   type TagColor,
 } from "@opal/components/tag/components";
+
+/* Divider */
+export {
+  Divider,
+  type DividerProps,
+} from "@opal/components/divider/components";
 
 /* Card */
 export {

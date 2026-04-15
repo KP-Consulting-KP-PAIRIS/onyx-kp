@@ -3,6 +3,7 @@ import os
 import time
 import traceback
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
@@ -50,6 +51,7 @@ from onyx.configs.constants import AuthType
 from onyx.configs.constants import CELERY_GENERIC_BEAT_LOCK_TIMEOUT
 from onyx.configs.constants import CELERY_INDEXING_LOCK_TIMEOUT
 from onyx.configs.constants import MilestoneRecordType
+from onyx.configs.constants import NotificationType
 from onyx.configs.constants import OnyxCeleryPriority
 from onyx.configs.constants import OnyxCeleryQueues
 from onyx.configs.constants import OnyxCeleryTask
@@ -85,6 +87,8 @@ from onyx.db.indexing_coordination import INDEXING_PROGRESS_TIMEOUT_HOURS
 from onyx.db.indexing_coordination import IndexingCoordination
 from onyx.db.models import IndexAttempt
 from onyx.db.models import SearchSettings
+from onyx.db.notification import create_notification
+from onyx.db.notification import get_notifications
 from onyx.db.search_settings import get_current_search_settings
 from onyx.db.search_settings import get_secondary_search_settings
 from onyx.db.swap_index import check_and_perform_index_swap
@@ -400,7 +404,6 @@ def check_indexing_completion(
     tenant_id: str,
     task: Task,
 ) -> None:
-
     logger.info(
         f"Checking for indexing completion: attempt={index_attempt_id} tenant={tenant_id}"
     )
@@ -551,6 +554,21 @@ def check_indexing_completion(
             # Clear repeated error state on success
             if cc_pair.in_repeated_error_state:
                 cc_pair.in_repeated_error_state = False
+
+                # Delete any existing error notification for this CC pair so a
+                # fresh one is created if the connector fails again later.
+                for notif in get_notifications(
+                    user=None,
+                    db_session=db_session,
+                    notif_type=NotificationType.CONNECTOR_REPEATED_ERRORS,
+                    include_dismissed=True,
+                ):
+                    if (
+                        notif.additional_data
+                        and notif.additional_data.get("cc_pair_id") == cc_pair.id
+                    ):
+                        db_session.delete(notif)
+
                 db_session.commit()
 
             if attempt.status == IndexingStatus.SUCCESS:
@@ -608,6 +626,27 @@ def active_indexing_attempt(
     return bool(active_indexing_attempt)
 
 
+@dataclass
+class _KickoffResult:
+    """Tracks diagnostic counts from a _kickoff_indexing_tasks run."""
+
+    created: int = 0
+    skipped_active: int = 0
+    skipped_not_found: int = 0
+    skipped_not_indexable: int = 0
+    failed_to_create: int = 0
+
+    @property
+    def evaluated(self) -> int:
+        return (
+            self.created
+            + self.skipped_active
+            + self.skipped_not_found
+            + self.skipped_not_indexable
+            + self.failed_to_create
+        )
+
+
 def _kickoff_indexing_tasks(
     celery_app: Celery,
     db_session: Session,
@@ -617,12 +656,12 @@ def _kickoff_indexing_tasks(
     redis_client: Redis,
     lock_beat: RedisLock,
     tenant_id: str,
-) -> int:
+) -> _KickoffResult:
     """Kick off indexing tasks for the given cc_pair_ids and search_settings.
 
-    Returns the number of tasks successfully created.
+    Returns a _KickoffResult with diagnostic counts.
     """
-    tasks_created = 0
+    result = _KickoffResult()
 
     for cc_pair_id in cc_pair_ids:
         lock_beat.reacquire()
@@ -633,6 +672,7 @@ def _kickoff_indexing_tasks(
             search_settings_id=search_settings.id,
             db_session=db_session,
         ):
+            result.skipped_active += 1
             continue
 
         cc_pair = get_connector_credential_pair_from_id(
@@ -643,6 +683,7 @@ def _kickoff_indexing_tasks(
             task_logger.warning(
                 f"_kickoff_indexing_tasks - CC pair not found: cc_pair={cc_pair_id}"
             )
+            result.skipped_not_found += 1
             continue
 
         # Heavyweight check after fetching cc pair
@@ -657,6 +698,7 @@ def _kickoff_indexing_tasks(
                 f"search_settings={search_settings.id}, "
                 f"secondary_index_building={secondary_index_building}"
             )
+            result.skipped_not_indexable += 1
             continue
 
         task_logger.debug(
@@ -696,13 +738,14 @@ def _kickoff_indexing_tasks(
             task_logger.info(
                 f"Connector indexing queued: index_attempt={attempt_id} cc_pair={cc_pair.id} search_settings={search_settings.id}"
             )
-            tasks_created += 1
+            result.created += 1
         else:
             task_logger.error(
                 f"Failed to create indexing task: cc_pair={cc_pair.id} search_settings={search_settings.id}"
             )
+            result.failed_to_create += 1
 
-    return tasks_created
+    return result
 
 
 @shared_task(
@@ -728,6 +771,8 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
     task_logger.warning("check_for_indexing - Starting")
 
     tasks_created = 0
+    primary_result = _KickoffResult()
+    secondary_result: _KickoffResult | None = None
     locked = False
     redis_client = get_redis_client()
     redis_client_replica = get_redis_replica_client()
@@ -848,6 +893,34 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
                         cc_pair_id=cc_pair_id,
                         in_repeated_error_state=True,
                     )
+
+                    connector_name = (
+                        cc_pair.name
+                        or cc_pair.connector.name
+                        or f"CC pair {cc_pair.id}"
+                    )
+                    source = cc_pair.connector.source.value
+                    connector_url = f"/admin/connector/{cc_pair.id}"
+                    create_notification(
+                        user_id=None,
+                        notif_type=NotificationType.CONNECTOR_REPEATED_ERRORS,
+                        db_session=db_session,
+                        title=f"Connector '{connector_name}' has entered repeated error state",
+                        description=(
+                            f"The {source} connector has failed repeatedly and "
+                            f"has been flagged. View indexing history in the "
+                            f"Advanced section: {connector_url}"
+                        ),
+                        additional_data={"cc_pair_id": cc_pair.id},
+                    )
+
+                    task_logger.error(
+                        f"Connector entered repeated error state: "
+                        f"cc_pair={cc_pair.id} "
+                        f"connector={cc_pair.connector.name} "
+                        f"source={source}"
+                    )
+
                     # When entering repeated error state, also pause the connector
                     # to prevent continued indexing retry attempts burning through embedding credits.
                     # NOTE: only for Cloud, since most self-hosted users use self-hosted embedding
@@ -863,7 +936,7 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
         # Heavy check, should_index(), is called in _kickoff_indexing_tasks
         with get_session_with_current_tenant() as db_session:
             # Primary first
-            tasks_created += _kickoff_indexing_tasks(
+            primary_result = _kickoff_indexing_tasks(
                 celery_app=self.app,
                 db_session=db_session,
                 search_settings=current_search_settings,
@@ -873,6 +946,7 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
                 lock_beat=lock_beat,
                 tenant_id=tenant_id,
             )
+            tasks_created += primary_result.created
 
             # Secondary indexing (only if secondary search settings exist and switchover_type is not INSTANT)
             if (
@@ -880,7 +954,7 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
                 and secondary_search_settings.switchover_type != SwitchoverType.INSTANT
                 and secondary_cc_pair_ids
             ):
-                tasks_created += _kickoff_indexing_tasks(
+                secondary_result = _kickoff_indexing_tasks(
                     celery_app=self.app,
                     db_session=db_session,
                     search_settings=secondary_search_settings,
@@ -890,6 +964,7 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
                     lock_beat=lock_beat,
                     tenant_id=tenant_id,
                 )
+                tasks_created += secondary_result.created
             elif (
                 secondary_search_settings
                 and secondary_search_settings.switchover_type == SwitchoverType.INSTANT
@@ -1002,7 +1077,26 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
                 redis_lock_dump(lock_beat, redis_client)
 
     time_elapsed = time.monotonic() - time_start
-    task_logger.info(f"check_for_indexing finished: elapsed={time_elapsed:.2f}")
+    task_logger.info(
+        f"check_for_indexing finished: "
+        f"elapsed={time_elapsed:.2f}s "
+        f"primary=[evaluated={primary_result.evaluated} "
+        f"created={primary_result.created} "
+        f"skipped_active={primary_result.skipped_active} "
+        f"skipped_not_found={primary_result.skipped_not_found} "
+        f"skipped_not_indexable={primary_result.skipped_not_indexable} "
+        f"failed={primary_result.failed_to_create}]"
+        + (
+            f" secondary=[evaluated={secondary_result.evaluated} "
+            f"created={secondary_result.created} "
+            f"skipped_active={secondary_result.skipped_active} "
+            f"skipped_not_found={secondary_result.skipped_not_found} "
+            f"skipped_not_indexable={secondary_result.skipped_not_indexable} "
+            f"failed={secondary_result.failed_to_create}]"
+            if secondary_result
+            else ""
+        )
+    )
     return tasks_created
 
 
